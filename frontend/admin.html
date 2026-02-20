@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amnezia Panel - Admin</title>
+	<link href="/static/tailwind.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen" x-data="adminPanel()" x-init="init()">
+        <!-- Header -->
+        <nav class="bg-white shadow-lg">
+            <div class="max-w-7xl mx-auto px-4">
+                <div class="flex justify-between items-center h-16">
+                    <h1 class="text-xl font-bold">Amnezia VPN Admin</h1>
+                    <button @click="logout" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+                        Logout
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="max-w-7xl mx-auto px-4 py-6">
+            <!-- Error Message -->
+            <div x-show="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                <span x-text="error"></span>
+            </div>
+
+            <!-- Success Message -->
+            <div x-show="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+                <span x-text="success"></span>
+            </div>
+
+            <!-- Add Client Form -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-lg font-bold mb-4">Add New Client</h2>
+                <form @submit.prevent="addClient">
+                    <div class="flex gap-2 max-w-md">
+                        <input type="text" x-model="newClientName"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                               placeholder="Client name (e.g. 'iPhone 15')" required>
+                        <button type="submit" 
+                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
+                                :disabled="adding">
+                            <span x-show="!adding">Add Client</span>
+                            <span x-show="adding">Adding...</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+			<!-- Clients Table -->
+			<div class="bg-white rounded-lg shadow-md p-6">
+				<div class="overflow-x-auto">
+					<table class="w-full">
+						<thead>
+							<tr class="bg-gray-50">
+								<th class="px-4 py-2 text-left">Name</th>
+								<th class="px-4 py-2 text-left">IP</th>
+								<th class="px-4 py-2 text-left">Public Key</th>
+								<th class="px-4 py-2 text-left">Traffic</th>
+								<th class="px-4 py-2 text-left">Limit</th>
+								<th class="px-4 py-2 text-left">Used</th>
+								<th class="px-4 py-2 text-left">Status</th>
+								<th class="px-4 py-2 text-left">Last Handshake</th>
+								<th class="px-4 py-2 text-left">Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							<template x-for="client in clients" :key="client.public_key">
+								<tr class="border-t" :class="{'bg-red-50': !client.is_active}">
+									<td class="px-4 py-2" x-text="client.name"></td>
+									<td class="px-4 py-2" x-text="client.ip"></td>
+									<td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
+									<td class="px-4 py-2" x-text="client.traffic || 'N/A'"></td>
+									
+									<!-- Limit column -->
+									<td class="px-4 py-2">
+										<div x-data="{ editing: false, newLimit: client.limit ? client.limit/1024/1024 : 0, unit: 'MB' }">
+											<template x-if="!editing">
+												<div>
+													<span x-text="client.limit ? formatBytes(client.limit) : 'No limit'"></span>
+													<button @click="editing = true; newLimit = client.limit ? client.limit/1024/1024 : 0" 
+															class="ml-2 text-blue-500 text-xs hover:text-blue-700">✎</button>
+												</div>
+											</template>
+											<template x-if="editing">
+												<div class="flex items-center gap-1">
+													<input type="number" x-model="newLimit" 
+														   class="w-20 px-1 py-0.5 border rounded text-sm"
+														   min="0" step="0.1">
+													<select x-model="unit" class="text-sm border rounded px-1 py-0.5">
+														<option value="MB">MB</option>
+														<option value="GB">GB</option>
+														<option value="TB">TB</option>
+													</select>
+													<button @click="setLimitWithUnit(client.public_key, newLimit, unit); editing = false" 
+															class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
+													<button @click="editing = false" 
+															class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+												</div>
+											</template>
+										</div>
+									</td>
+									
+									<!-- Used column -->
+									<td class="px-4 py-2">
+										<span x-text="formatBytes(client.used)"></span>
+										<span x-show="client.limit" class="text-xs text-gray-500">
+											(<span x-text="((client.used/client.limit)*100).toFixed(1)"></span>%)
+										</span>
+									</td>
+									
+									<!-- Status column -->
+									<td class="px-4 py-2">
+										<span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
+										<span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
+									</td>
+									
+									<!-- Last Handshake -->
+									<td class="px-4 py-2" x-text="client.handshake || 'Never'"></td>
+									
+									<!-- Actions -->
+									<td class="px-4 py-2">
+										<button @click="showConfig(client)" 
+												class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 mr-2">
+											Config
+										</button>
+										<button @click="deleteClient(client.public_key, client.name)" 
+												class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
+											Delete
+										</button>
+									</td>
+								</tr>
+							</template>
+						</tbody>
+					</table>
+				</div>
+			</div>
+        </div>
+
+        <!-- Config Modal -->
+        <div x-show="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
+             @click.self="showConfigModal = false">
+            <div class="bg-white rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
+                    <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                </div>
+                
+                <!-- QR Code -->
+                <div class="flex justify-center mb-4" id="qrcode"></div>
+                
+                <!-- Config Text -->
+                <pre class="bg-gray-100 p-4 rounded text-sm overflow-x-auto" x-text="selectedConfig"></pre>
+                
+                <!-- Download Button -->
+                <div class="flex justify-end mt-4">
+                    <button @click="downloadConfig" 
+                            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                        Download Config
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function adminPanel() {
+        return {
+            clients: [],
+            traffic: [],
+            error: '',
+            success: '',
+            newClientName: '',
+            adding: false,
+            showConfigModal: false,
+            selectedConfig: '',
+            selectedClientName: '',
+            
+            init() {
+                const token = localStorage.getItem('token');
+                const role = localStorage.getItem('role');
+                
+                if (!token || role !== 'admin') {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                this.fetchClients();
+                this.fetchTraffic();
+                
+                setInterval(() => {
+                    this.fetchTraffic();
+                }, 30000);
+            },
+            
+            async fetchClients() {
+                try {
+                    const response = await fetch('/api/clients', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const clientsData = await response.json();
+                        
+                        // Получаем лимиты из БД
+                        const limitsResponse = await fetch('/api/limits', {
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            }
+                        });
+                        
+                        if (limitsResponse.ok) {
+                            const limits = await limitsResponse.json();
+                            const limitsMap = {};
+                            limits.forEach(l => {
+                                limitsMap[l.public_key] = l;
+                            });
+                            
+                            // Объединяем с трафиком
+                            const trafficMap = {};
+                            this.traffic.forEach(t => {
+                                trafficMap[t.public_key] = t;
+                            });
+                            
+                            this.clients = clientsData.map(client => ({
+                                ...client,
+                                traffic: trafficMap[client.public_key]?.transfer || '0 B',
+                                handshake: trafficMap[client.public_key]?.latest_handshake || 'Never',
+                                limit: limitsMap[client.public_key]?.limit,
+                                used: limitsMap[client.public_key]?.used || 0,
+                                is_active: limitsMap[client.public_key]?.is_active !== false
+                            }));
+                        }
+                    } else if (response.status === 401) {
+                        this.logout();
+                    } else {
+                        this.error = 'Failed to fetch clients';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to fetch clients';
+                }
+            },
+            
+			async fetchTraffic() {
+				try {
+					const response = await fetch('/api/traffic', {
+						headers: {
+							'Authorization': `Bearer ${localStorage.getItem('token')}`
+						}
+					});
+					
+					if (response.ok) {
+						this.traffic = await response.json();
+						this.mergeTraffic();  // ← этот вызов должен быть
+					}
+				} catch (err) {
+					console.error('Failed to fetch traffic');
+				}
+			},
+            
+			mergeTraffic() {
+				const trafficMap = {};
+				this.traffic.forEach(t => {
+					trafficMap[t.public_key] = t;
+				});
+				
+				// Сохраняем текущие лимиты перед обновлением
+				const currentLimits = {};
+				this.clients.forEach(c => {
+					currentLimits[c.public_key] = {
+						limit: c.limit,
+						used: c.used,
+						is_active: c.is_active
+					};
+				});
+				
+				// Обновляем только трафик, лимиты оставляем как есть
+				this.clients = this.clients.map(client => ({
+					...client,
+					traffic: trafficMap[client.public_key]?.transfer || '0 B',
+					handshake: trafficMap[client.public_key]?.latest_handshake || 'Never',
+					// Сохраняем лимиты из currentLimits, если они были
+					limit: currentLimits[client.public_key]?.limit || client.limit,
+					used: currentLimits[client.public_key]?.used || client.used || 0,
+					is_active: currentLimits[client.public_key]?.is_active !== undefined ? 
+							   currentLimits[client.public_key].is_active : 
+							   (client.is_active !== false)
+				}));
+			},
+            
+            async addClient() {
+                this.adding = true;
+                this.error = '';
+                this.success = '';
+                
+                try {
+                    const response = await fetch('/api/clients', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ name: this.newClientName })
+                    });
+                    
+                    if (response.ok) {
+                        const newClient = await response.json();
+                        this.clients.push(newClient);
+                        this.newClientName = '';
+                        this.success = 'Client added successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        
+                        this.showConfig(newClient);
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to add client';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to add client';
+                } finally {
+                    this.adding = false;
+                }
+            },
+            
+            async showConfig(client) {
+                try {
+                    const response = await fetch(`/api/user-config?public_key=${encodeURIComponent(client.public_key)}`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.selectedConfig = data.config;
+                        this.selectedClientName = client.name;
+                        this.showConfigModal = true;
+                        
+                        setTimeout(() => {
+                            document.getElementById('qrcode').innerHTML = '';
+                            QRCode.toCanvas(document.getElementById('qrcode'), data.config, {
+                                width: 200
+                            });
+                        }, 100);
+                    } else {
+                        this.error = 'Failed to get config';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to get config';
+                }
+            },
+            
+            downloadConfig() {
+                const blob = new Blob([this.selectedConfig], { type: 'text/plain' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${this.selectedClientName || 'client'}.conf`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            },
+
+            async deleteClient(publicKey, clientName) {
+                if (!confirm(`Are you sure you want to delete ${clientName}?`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        this.clients = this.clients.filter(c => c.public_key !== publicKey);
+                        this.success = 'Client deleted successfully';
+                        setTimeout(() => this.success = '', 3000);
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to delete client';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to delete client';
+                }
+            },
+
+            async setLimit(publicKey, limitBytes) {
+				try {
+					const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
+						method: 'POST',
+						headers: {
+							'Authorization': `Bearer ${localStorage.getItem('token')}`
+						}
+					});
+					
+					if (response.ok) {
+						this.success = 'Limit updated successfully';
+						setTimeout(() => this.success = '', 3000);
+						
+						// Обновляем данные
+						const limitsResponse = await fetch('/api/limits', {
+							headers: {
+								'Authorization': `Bearer ${localStorage.getItem('token')}`
+							}
+						});
+						
+						if (limitsResponse.ok) {
+							const limits = await limitsResponse.json();
+							const limitsMap = {};
+							limits.forEach(l => {
+								limitsMap[l.public_key] = l;
+							});
+							
+							this.clients = this.clients.map(client => ({
+								...client,
+								limit: limitsMap[client.public_key]?.limit,
+								used: limitsMap[client.public_key]?.used || 0,
+								is_active: limitsMap[client.public_key]?.is_active !== false
+							}));
+						}
+					} else {
+						const error = await response.json();
+						this.error = error.detail || 'Failed to set limit';
+					}
+				} catch (err) {
+					this.error = 'Failed to set limit';
+				}
+			},
+            
+			// Добавь эту функцию после setLimit
+			formatBytes(bytes) {
+				if (!bytes || bytes === 0) return '0 B';
+				const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+				const k = 1024;
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
+			},
+
+			setLimitWithUnit(publicKey, value, unit) {
+				let bytes = value;
+				switch(unit) {
+					case 'MB': bytes = value * 1024 * 1024; break;
+					case 'GB': bytes = value * 1024 * 1024 * 1024; break;
+					case 'TB': bytes = value * 1024 * 1024 * 1024 * 1024; break;
+					default: bytes = value * 1024 * 1024; // MB по умолчанию
+				}
+				this.setLimit(publicKey, Math.round(bytes));
+			},
+			
+            logout() {
+                localStorage.removeItem('token');
+                localStorage.removeItem('role');
+                window.location.href = '/login';
+            }
+        }
+    }
+</script>
