@@ -1,0 +1,17 @@
+services:
+  backend:
+    build: ./backend
+    container_name: amnezia-panel
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./frontend:/frontend
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - JWT_SECRET=your-secret-key-change-this
+    network_mode: "host"
