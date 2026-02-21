@@ -5,22 +5,12 @@ from typing import Optional
 SECRET_KEY = "your-secret-key-change-this"
 ALGORITHM = "HS256"
 
-users_db = {
-    "admin": {
-        "username": "admin",
-        "password": "admin123",
-        "role": "admin"
-    },
-    "user": {
-        "username": "user",
-        "password": "user123",
-        "role": "user"
-    }
-}
-
 def authenticate_user(username: str, password: str):
-    if username in users_db and users_db[username]["password"] == password:
-        return users_db[username]
+    """Проверяет учётные данные пользователя"""
+    from database import get_user_by_username
+    user = get_user_by_username(username)
+    if user and user["password"] == password:
+        return user
     return None
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
