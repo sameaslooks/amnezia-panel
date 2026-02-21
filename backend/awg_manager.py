@@ -56,7 +56,6 @@ class AWGManager:
         self.collect_traffic_stats()  # ← добавляем эту строку
         
         output = self._exec_in_container("awg show")
-        output = self._exec_in_container("awg show")
         if not output:
             return []
         
@@ -144,14 +143,17 @@ class AWGManager:
         private_key = self._exec_in_container("awg genkey").strip()
         public_key = self._exec_in_container(f"echo '{private_key}' | awg pubkey").strip()
         
+        # Генерируем Pre-shared ключ для этого пира
+        psk = self._exec_in_container("wg genpsk").strip()
+        
         # Получаем текущий конфиг
         config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         
         # Определяем следующий IP
         next_ip = self._get_next_ip(config)
         
-        # Добавляем пира через awg set
-        add_command = f"awg set awg0 peer {public_key} allowed-ips {next_ip}"
+        # Добавляем пира через awg set с PSK (используя файловый дескриптор)
+        add_command = f"awg set awg0 peer {public_key} allowed-ips {next_ip} preshared-key <(echo '{psk}')"
         self._exec_in_container(add_command)
         
         # Сохраняем конфиг
@@ -189,16 +191,27 @@ Address = {next_ip}
 DNS = {server_params['dns']}
 Jc = {server_params['jc']}
 Jmin = {server_params['jmin']}
-Jmax = {server_params['jmax']}
+Jmax = {server_params['jmax']}  
 
 [Peer]
 PublicKey = {server_params['public_key']}
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = {server_params['endpoint']}:{server_params['port']}
+"""
+        
+        if psk:
+            client_config += f"PresharedKey = {psk}\n"
+            
+        client_config += """AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
         from database import create_client
-        create_client(public_key, name, next_ip)
+        create_client(public_key, name, next_ip, private_key)
+        # Save client config file inside the AWG container for later recovery
+        safe_path = f"/opt/amnezia/awg/client_configs"
+        # create directory and write file
+        write_cmd = (
+            f"mkdir -p {safe_path} && cat > {safe_path}/{public_key}.conf << 'EOF'\n{client_config}\nEOF"
+        )
+        self._exec_in_container(write_cmd)
         return {
             "name": name,
             "ip": next_ip,
@@ -239,38 +252,155 @@ PersistentKeepalive = 25
         # Ищем IP клиента
         peers = config.split('[Peer]')[1:]
         client_ip = None
+        peer_text = None
         for peer in peers:
             if public_key in peer:
+                peer_text = peer
                 ip_match = re.search(r'AllowedIPs\s*=\s*([\d\.]+/\d+)', peer)
                 if ip_match:
                     client_ip = ip_match.group(1)
-                    break
+                break
         
         if not client_ip:
             return ""
         
-        # Параметры обфускации
-        jc = re.search(r'Jc\s*=\s*(\d+)', config)
-        jmin = re.search(r'Jmin\s*=\s*(\d+)', config)
-        jmax = re.search(r'Jmax\s*=\s*(\d+)', config)
-        
-        server_ip = self._get_server_ip()
-        
-        return f"""[Interface]
-    # PrivateKey will need to be provided by the client
-    Address = {client_ip}
-    DNS = 1.1.1.1, 1.0.0.1
-    Jc = {jc.group(1) if jc else 5}
-    Jmin = {jmin.group(1) if jmin else 50}
-    Jmax = {jmax.group(1) if jmax else 1000}
+        # Получаем приватный ключ из БД
+        from database import get_client
+        client_data = get_client(public_key)
+        private_key = client_data.get('private_key', '') if client_data else ''
+        # Если в БД нет приватного ключа — пробуем загрузить из сохранённого конфига
+        if not private_key:
+            try:
+                cfg = self._exec_in_container(f"cat /opt/amnezia/awg/client_configs/{public_key}.conf 2>/dev/null || true")
+                if cfg:
+                    m = re.search(r'PrivateKey\s*=\s*(\S+)', cfg)
+                    if m:
+                        private_key = m.group(1)
+                        # Сохраняем в БД, не перезаписывая существующее не-пустое значение
+                        from database import create_client
+                        # get existing name/ip from DB or peers
+                        name = client_data.get('name') if client_data else ''
+                        ip = client_ip
+                        create_client(public_key, name, ip, private_key)
+            except Exception:
+                pass
+        # Если всё ещё нет приватного ключа — ищем по всем файлам в /opt/amnezia/awg
+        if not private_key:
+            try:
+                # Получаем список файлов, где встречается эта PublicKey
+                files_list = self._exec_in_container(f"grep -R -l \"PublicKey = {public_key}\" /opt/amnezia/awg 2>/dev/null || true")
+                for fp in files_list.splitlines():
+                    fp = fp.strip()
+                    if not fp:
+                        continue
+                    file_contents = self._exec_in_container(f"cat {fp} 2>/dev/null || true")
+                    m2 = re.search(r'PrivateKey\s*=\s*(\S+)', file_contents)
+                    if m2:
+                        private_key = m2.group(1)
+                        from database import create_client
+                        name = client_data.get('name') if client_data else ''
+                        ip = client_ip
+                        create_client(public_key, name, ip, private_key)
+                        break
+            except Exception:
+                pass
+        # Параметры obfuscation и прочие поля (S/H/I)
+        def find(pattern, default=""):
+            m = re.search(pattern, config)
+            return m.group(1) if m else default
 
-    [Peer]
-    PublicKey = {server_public}
-    AllowedIPs = 0.0.0.0/0, ::/0
-    Endpoint = {server_ip}:32308
-    PersistentKeepalive = 25
-    """
-    
+        jc = find(r'Jc\s*=\s*(\d+)', '5')
+        jmin = find(r'Jmin\s*=\s*(\d+)', '50')
+        jmax = find(r'Jmax\s*=\s*(\d+)', '1000')
+
+        s1 = find(r'S1\s*=\s*(\d+)', '')
+        s2 = find(r'S2\s*=\s*(\d+)', '')
+        s3 = find(r'S3\s*=\s*(\d+)', '')
+        s4 = find(r'S4\s*=\s*(\d+)', '')
+
+        h1 = find(r'H1\s*=\s*(\S+)', '')
+        h2 = find(r'H2\s*=\s*(\S+)', '')
+        h3 = find(r'H3\s*=\s*(\S+)', '')
+        h4 = find(r'H4\s*=\s*(\S+)', '')
+
+        # I1..I5 - preserve raw (may be long blob or empty)
+        i1 = find(r'I1\s*=\s*(.*)', '')
+        i2 = find(r'I2\s*=\s*(.*)', '')
+        i3 = find(r'I3\s*=\s*(.*)', '')
+        i4 = find(r'I4\s*=\s*(.*)', '')
+        i5 = find(r'I5\s*=\s*(.*)', '')
+
+        # ListenPort (use actual value if present)
+        listen_port = find(r'ListenPort\s*=\s*(\d+)', '')
+
+        # DNS from server params (fallback to common defaults)
+        server_params = self._get_server_params(config)
+        dns = server_params.get('dns', '1.1.1.1, 1.0.0.1')
+
+        server_host = self._get_server_ip()
+
+        # PresharedKey for this peer (if present in peer block)
+        psk = ''
+        if peer_text:
+            pm = re.search(r'PresharedKey\s*=\s*(\S+)', peer_text)
+            if pm:
+                psk = pm.group(1)
+
+        # Формируем строгий конфиг в требуемом формате
+        endpoint = f"{server_host}:{listen_port}" if listen_port else f"{server_host}:32308"
+
+        psk_line = f"PresharedKey = {psk}\n" if psk else ""
+
+            # Build config lines, omitting empty I1..I5 lines
+        iface_lines = [
+            "[Interface]",
+            f"Address = {client_ip}",
+            f"DNS = {dns}",
+            f"PrivateKey = {private_key}",
+            f"Jc = {jc}",
+            f"Jmin = {jmin}",
+            f"Jmax = {jmax}",
+            f"S1 = {s1}",
+            f"S2 = {s2}",
+            f"S3 = {s3}",
+            f"S4 = {s4}",
+            f"H1 = {h1}",
+            f"H2 = {h2}",
+            f"H3 = {h3}",
+            f"H4 = {h4}",
+        ]
+
+        # Only include I1..I5 if non-empty
+        if i1 and i1.strip():
+            iface_lines.append(f"I1 = {i1}")
+        if i2 and i2.strip():
+            iface_lines.append(f"I2 = {i2}")
+        if i3 and i3.strip():
+            iface_lines.append(f"I3 = {i3}")
+        if i4 and i4.strip():
+            iface_lines.append(f"I4 = {i4}")
+        if i5 and i5.strip():
+            iface_lines.append(f"I5 = {i5}")
+
+        iface_lines.append("")
+        iface = "\n".join(iface_lines)
+
+        peer_lines = [
+            "[Peer]",
+            f"PublicKey = {server_public}",
+        ]
+
+        if psk:
+            peer_lines.append(f"PresharedKey = {psk}")
+
+        peer_lines.extend([
+            "AllowedIPs = 0.0.0.0/0, ::/0",
+            f"Endpoint = {endpoint}",
+            "PersistentKeepalive = 25",
+        ])
+
+        return iface + "\n" + "\n".join(peer_lines)
+
     def get_traffic_bytes(self) -> Dict[str, Dict]:
         """Получает трафик в байтах для каждого клиента"""
         output = self._exec_in_container("awg show")
@@ -317,31 +447,32 @@ PersistentKeepalive = 25
         except:
             return 0
         return 0
-    def parse_bytes(self, size_str: str) -> int:
-        """Конвертирует строку вида '1.23 GiB' в байты"""
+    
+    def _parse_bytes(self, size_str: str) -> int:
+        """Convert human-readable sizes like '1.23 GiB' to bytes."""
         try:
-            size_str = size_str.strip()
-            if 'GiB' in size_str:
-                return int(float(size_str.replace('GiB', '').strip()) * 1024**3)
-            elif 'MiB' in size_str:
-                return int(float(size_str.replace('MiB', '').strip()) * 1024**2)
-            elif 'KiB' in size_str:
-                return int(float(size_str.replace('KiB', '').strip()) * 1024)
-            elif 'B' in size_str:
-                return int(float(size_str.replace('B', '').strip()))
-        except:
+            s = size_str.strip()
+            if 'GiB' in s:
+                return int(float(s.replace('GiB', '').strip()) * 1024**3)
+            if 'MiB' in s:
+                return int(float(s.replace('MiB', '').strip()) * 1024**2)
+            if 'KiB' in s:
+                return int(float(s.replace('KiB', '').strip()) * 1024)
+            if 'B' in s:
+                return int(float(s.replace('B', '').strip()))
+        except Exception:
             return 0
         return 0
 
     def collect_traffic_stats(self):
-        """Собирает статистику трафика и обновляет БД"""
+        """Collect traffic from `awg show`, parse and update DB."""
         output = self._exec_in_container("awg show")
         if not output:
             return
-        
+
         lines = output.split('\n')
         current_peer = None
-        
+
         for line in lines:
             line = line.strip()
             if line.startswith('peer:'):
@@ -349,49 +480,17 @@ PersistentKeepalive = 25
             elif 'transfer:' in line and current_peer:
                 transfer = line.split('transfer:')[1].strip()
                 try:
+                    # Parse "1.23 GiB received, 4.56 GiB sent"
                     parts = transfer.split(',')
                     received_str = parts[0].replace('received', '').strip()
                     sent_str = parts[1].replace('sent', '').strip()
-                    
-                    received = self.parse_bytes(received_str)
-                    sent = self.parse_bytes(sent_str)
-                    
-                    # Передаём self для возможности блокировки
+
+                    received = self._parse_bytes(received_str)
+                    sent = self._parse_bytes(sent_str)
+
                     from database import update_traffic_usage
                     update_traffic_usage(current_peer, received, sent, self)
-                except Exception as e:
-                    print(f"Error parsing traffic: {e}")
-                    continue
-                    
-    def collect_traffic_stats(self):
-        """Собирает статистику трафика и обновляет БД"""
-        output = self._exec_in_container("awg show")
-        if not output:
-            return
-        
-        lines = output.split('\n')
-        current_peer = None
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith('peer:'):
-                current_peer = line.split('peer:')[1].strip()
-            elif 'transfer:' in line and current_peer:
-                transfer = line.split('transfer:')[1].strip()
-                try:
-                    # Парсим "1.23 GiB received, 4.56 GiB sent"
-                    parts = transfer.split(',')
-                    received_str = parts[0].replace('received', '').strip()
-                    sent_str = parts[1].replace('sent', '').strip()
-                    
-                    received = self.parse_bytes(received_str)
-                    sent = self.parse_bytes(sent_str)
-                    
-                    # Обновляем в БД
-                    from database import update_traffic_usage
-                    update_traffic_usage(current_peer, received, sent, self)
-                except Exception as e:
-                    print(f"Error parsing traffic: {e}")
+                except Exception:
                     continue
                     
     def block_client(self, public_key: str):
@@ -447,7 +546,8 @@ PersistentKeepalive = 25
 
     def sync_iptables_with_db(self):
         """Синхронизирует iptables с базой данных"""
-        from database import get_all_clients
+ 
+        # client["ip"] уже содержит /32, но нам нужно это проверить       from database import get_all_clients
         clients = get_all_clients()
         
         for client in clients:

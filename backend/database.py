@@ -11,13 +11,25 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
+    # Таблица пользователей
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     # Таблица клиентов
     c.execute('''
         CREATE TABLE IF NOT EXISTS clients (
             public_key TEXT PRIMARY KEY,
             name TEXT,
             ip TEXT,
-            traffic_limit_bytes INTEGER,  -- NULL = без лимита
+            private_key TEXT,
+            traffic_limit_bytes INTEGER,
             traffic_used_bytes INTEGER DEFAULT 0,
             is_active BOOLEAN DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -39,13 +51,26 @@ def init_db():
     ''')
     
     conn.commit()
+    
+    # Инициализируем пользователей по умолчанию
+    try:
+        c.execute("SELECT COUNT(*) FROM users")
+        if c.fetchone()[0] == 0:
+            c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                     ("admin", "admin123", "admin"))
+            c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                     ("user", "user123", "user"))
+            conn.commit()
+    except:
+        pass
+    
     conn.close()
 
 def get_client(public_key: str):
     """Получает данные клиента"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT name, ip, traffic_limit_bytes, traffic_used_bytes, is_active FROM clients WHERE public_key = ?', 
+    c.execute('SELECT name, ip, private_key, traffic_limit_bytes, traffic_used_bytes, is_active FROM clients WHERE public_key = ?', 
               (public_key,))
     result = c.fetchone()
     conn.close()
@@ -54,20 +79,27 @@ def get_client(public_key: str):
         return {
             "name": result[0],
             "ip": result[1],
-            "limit": result[2],
-            "used": result[3],
-            "is_active": bool(result[4])
+            "private_key": result[2],
+            "limit": result[3],
+            "used": result[4],
+            "is_active": bool(result[5])
         }
     return None
 
-def create_client(public_key: str, name: str, ip: str):
+def create_client(public_key: str, name: str, ip: str, private_key: str = ""):
     """Создаёт запись о клиенте"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    # Use UPSERT to ensure we save private_key even if a placeholder row exists
     c.execute('''
-        INSERT INTO clients (public_key, name, ip)
-        VALUES (?, ?, ?)
-    ''', (public_key, name, ip))
+        INSERT INTO clients (public_key, name, ip, private_key, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(public_key) DO UPDATE SET
+            name=excluded.name,
+            ip=excluded.ip,
+            private_key=CASE WHEN excluded.private_key IS NULL OR excluded.private_key = '' THEN clients.private_key ELSE excluded.private_key END,
+            updated_at=CURRENT_TIMESTAMP
+    ''', (public_key, name, ip, private_key))
     conn.commit()
     conn.close()
 
@@ -110,7 +142,7 @@ def update_traffic_usage(public_key: str, received: int, sent: int, awg_manager=
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    c.execute('SELECT traffic_limit_bytes, traffic_used_bytes, is_active FROM clients WHERE public_key = ?', (public_key,))
+    c.execute('SELECT traffic_limit_bytes, traffic_used_bytes, is_active FROM clientsTable WHERE public_key = ?', (public_key,))
     row = c.fetchone()
     if not row:
         conn.close()
@@ -139,54 +171,6 @@ def update_traffic_usage(public_key: str, received: int, sent: int, awg_manager=
     
     conn.close()
 
-def update_traffic_usage(public_key: str, received: int, sent: int, awg_manager=None):
-    """Обновляет использованный трафик и блокирует при превышении"""
-    print(f"\n=== update_traffic_usage called for {public_key} ===")
-    print(f"Received: {received}, Sent: {sent}, Total: {received + sent}")
-    
-    total = received + sent
-    
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # Получаем текущие данные клиента
-    c.execute('SELECT traffic_limit_bytes, traffic_used_bytes, is_active FROM clients WHERE public_key = ?', (public_key,))
-    row = c.fetchone()
-    
-    if not row:
-        print(f"Client {public_key} not found in DB")
-        conn.close()
-        return
-    
-    limit_bytes, used_bytes, is_active = row
-    print(f"DB data - limit: {limit_bytes}, used: {used_bytes}, is_active: {is_active}")
-    
-    # Обновляем использованный трафик
-    new_used = max(total, used_bytes)
-    print(f"New used value: {new_used}")
-    
-    c.execute('UPDATE clients SET traffic_used_bytes = ? WHERE public_key = ?', (new_used, public_key))
-    c.execute('INSERT INTO traffic_history (public_key, bytes_received, bytes_sent, total_bytes) VALUES (?, ?, ?, ?)',
-              (public_key, received, sent, total))
-    
-    conn.commit()
-    
-    if limit_bytes and new_used > limit_bytes and is_active:
-        print(f"🚨 LIMIT EXCEEDED! {new_used} > {limit_bytes}")
-        
-        # Сначала вызываем блокировку
-        if awg_manager:
-            print(f"Calling block_client for {public_key}")
-            awg_manager.block_client(public_key)
-        
-        # Потом обновляем БД
-        c.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (public_key,))
-        conn.commit()
-        conn.close()
-        return
-    
-    print("Limit not exceeded or no limit set")
-    conn.close()
 
 def check_and_deactivate_overlimit():
     """Проверяет клиентов, превысивших лимит, и деактивирует их"""
@@ -258,6 +242,79 @@ def get_all_clients():
         }
         for row in rows
     ]
+
+# ========== USERS MANAGEMENT ==========
+
+def get_all_users():
+    """Получает всех пользователей"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC')
+    rows = c.fetchall()
+    conn.close()
+    
+    return [
+        {
+            "id": row[0],
+            "username": row[1],
+            "role": row[2],
+            "created_at": row[3]
+        }
+        for row in rows
+    ]
+
+def create_user(username: str, password: str, role: str = "user"):
+    """Создаёт нового пользователя"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute('INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+                 (username, password, role))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+
+def update_user(user_id: int, username: str = None, password: str = None, role: str = None):
+    """Обновляет пользователя"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    if username:
+        c.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
+    if password:
+        c.execute('UPDATE users SET password = ? WHERE id = ?', (password, user_id))
+    if role:
+        c.execute('UPDATE users SET role = ? WHERE id = ?', (role, user_id))
+    
+    conn.commit()
+    conn.close()
+
+def delete_user(user_id: int):
+    """Удаляет пользователя"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def get_user_by_username(username: str):
+    """Получает пользователя по имени"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT username, password, role FROM users WHERE username = ?', (username,))
+    result = c.fetchone()
+    conn.close()
+    
+    if result:
+        return {
+            "username": result[0],
+            "password": result[1],
+            "role": result[2]
+        }
+    return None
 
 def reset_traffic_for_limit(public_key: str):
     """Сбрасывает счётчик трафика при установке нового лимита"""
