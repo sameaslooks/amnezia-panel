@@ -13,10 +13,24 @@
         <!-- Header -->
         <nav class="bg-white shadow-lg">
             <div class="max-w-7xl mx-auto px-4">
-                <div class="flex justify-between items-center h-16">
-                    <h1 class="text-xl font-bold">Amnezia VPN Admin</h1>
+                <div class="flex justify-between items-center">
+                    <h1 class="text-xl font-bold py-4">Amnezia VPN Admin</h1>
                     <button @click="logout" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
                         Logout
+                    </button>
+                </div>
+                
+                <!-- Tabs -->
+                <div class="flex border-b">
+                    <button @click="activeTab = 'clients'"
+                            :class="activeTab === 'clients' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
+                            class="py-3 px-4 font-medium transition">
+                        VPN Clients
+                    </button>
+                    <button @click="activeTab = 'users'"
+                            :class="activeTab === 'users' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
+                            class="py-3 px-4 font-medium transition">
+                        Users
                     </button>
                 </div>
             </div>
@@ -34,26 +48,28 @@
                 <span x-text="success"></span>
             </div>
 
-            <!-- Add Client Form -->
-            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-                <h2 class="text-lg font-bold mb-4">Add New Client</h2>
-                <form @submit.prevent="addClient">
-                    <div class="flex gap-2 max-w-md">
-                        <input type="text" x-model="newClientName"
-                               class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                               placeholder="Client name (e.g. 'iPhone 15')" required>
-                        <button type="submit" 
-                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
-                                :disabled="adding">
-                            <span x-show="!adding">Add Client</span>
-                            <span x-show="adding">Adding...</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
+            <!-- CLIENTS TAB -->
+            <div x-show="activeTab === 'clients'">
+                <!-- Add Client Form -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h2 class="text-lg font-bold mb-4">Add New Client</h2>
+                    <form @submit.prevent="addClient">
+                        <div class="flex gap-2 max-w-md">
+                            <input type="text" x-model="newClientName"
+                                   class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                   placeholder="Client name (e.g. 'iPhone 15')" required>
+                            <button type="submit" 
+                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
+                                    :disabled="adding">
+                                <span x-show="!adding">Add Client</span>
+                                <span x-show="adding">Adding...</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
 
-			<!-- Clients Table -->
-			<div class="bg-white rounded-lg shadow-md p-6">
+                <!-- Clients Table -->
+                <div class="bg-white rounded-lg shadow-md p-6">
 				<div class="overflow-x-auto">
 					<table class="w-full">
 						<thead>
@@ -139,31 +155,173 @@
 						</tbody>
 					</table>
 				</div>
-			</div>
+            </div>
+            </div>
+
+            <!-- USERS TAB -->
+            <div x-show="activeTab === 'users'">
+                <!-- Add User Form -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h2 class="text-lg font-bold mb-4">Add New User</h2>
+                    <form @submit.prevent="addUser">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                            <input type="text" x-model="newUser.username"
+                                   class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                   placeholder="Username" required>
+                            <input type="password" x-model="newUser.password"
+                                   class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                   placeholder="Password" required>
+                            <select x-model="newUser.role" 
+                                    class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                            <button type="submit" 
+                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
+                                    :disabled="addingUser">
+                                <span x-show="!addingUser">Add User</span>
+                                <span x-show="addingUser">Adding...</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Users Table -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Username</th>
+                                    <th class="px-4 py-2 text-left">Role</th>
+                                    <th class="px-4 py-2 text-left">Created</th>
+                                    <th class="px-4 py-2 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="user in users" :key="user.id">
+                                    <tr class="border-t">
+                                        <td class="px-4 py-2" x-text="user.username"></td>
+                                        <td class="px-4 py-2">
+                                            <span class="px-2 py-1 rounded text-sm"
+                                                  :class="user.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'"
+                                                  x-text="user.role"></span>
+                                        </td>
+                                        <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(user.created_at).toLocaleDateString()"></td>
+                                        <td class="px-4 py-2">
+                                            <button @click="editUser(user)" 
+                                                    class="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 mr-2">
+                                                Edit
+                                            </button>
+                                            <button @click="deleteUserConfirm(user)" 
+                                                    class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                                    :disabled="user.username === currentUser">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- Config Modal -->
-        <div x-show="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
-             @click.self="showConfigModal = false">
-            <div class="bg-white rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
+        <!-- Overlay -->
+        <div x-show="showConfigModal"
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            @click.self="showConfigModal = false">
+
+            <!-- Центрируем flex-контейнер -->
+            <div class="flex gap-6 justify-center items-start max-w-[90vw] w-full">
+
+                <!-- 1. Конфиг -->
+                <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
+                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                    </div>
+
+                    <pre class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap break-words" x-text="selectedConfig"></pre>
+
+                    <div class="flex justify-end mt-4">
+                        <button @click="downloadConfig"
+                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                            Download Config
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2. QR -->
+                <div class="bg-white rounded-lg p-5 shadow-2xl flex-shrink-0
+                            w-[clamp(220px,18vw,280px)] flex flex-col items-center">
+                    <div class="flex justify-between items-center w-full mb-3">
+                        <h3 class="text-sm font-semibold">QR Code</h3>
+                        <button @click="showConfigModal = false"
+                                class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
+                    </div>
+
+                    <canvas id="qrcode"
+                            class="bg-white p-2 rounded shadow"
+                            :width="qrSize"
+                            :height="qrSize"></canvas>
+                    <div class="text-xs text-gray-600 mt-2 text-center">
+                        Scan to import
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Edit User Modal -->
+        <div x-show="showEditModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+             @click.self="showEditModal = false">
+            <div class="bg-white rounded-lg p-6 max-w-md w-full">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
-                    <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                    <h3 class="text-lg font-bold">Edit User</h3>
+                    <button @click="showEditModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
-                
-                <!-- QR Code -->
-                <div class="flex justify-center mb-4" id="qrcode"></div>
-                
-                <!-- Config Text -->
-                <pre class="bg-gray-100 p-4 rounded text-sm overflow-x-auto" x-text="selectedConfig"></pre>
-                
-                <!-- Download Button -->
-                <div class="flex justify-end mt-4">
-                    <button @click="downloadConfig" 
-                            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
-                        Download Config
-                    </button>
-                </div>
+
+                <form @submit.prevent="saveUser">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Username</label>
+                            <input type="text" x-model="editingUser.username"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                   placeholder="Username">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Password (leave empty to keep current)</label>
+                            <input type="password" x-model="editingUser.password"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                   placeholder="New password">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Role</label>
+                            <select x-model="editingUser.role" 
+                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </div>
+
+                        <div class="flex gap-2 justify-end">
+                            <button type="button" @click="showEditModal = false"
+                                    class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
+                                Cancel
+                            </button>
+                            <button type="submit"
+                                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                                    :disabled="savingUser">
+                                <span x-show="!savingUser">Save</span>
+                                <span x-show="savingUser">Saving...</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -173,6 +331,7 @@
         return {
             clients: [],
             traffic: [],
+            users: [],
             error: '',
             success: '',
             newClientName: '',
@@ -180,18 +339,29 @@
             showConfigModal: false,
             selectedConfig: '',
             selectedClientName: '',
+            activeTab: 'clients',
+            newUser: { username: '', password: '', role: 'user' },
+            editingUser: { username: '', password: '', role: 'user' },
+            showEditModal: false,
+            addingUser: false,
+            savingUser: false,
+            currentUser: '',
+            qrSize: 400,  // QR code size in pixels (change here to adjust)
             
             init() {
                 const token = localStorage.getItem('token');
                 const role = localStorage.getItem('role');
+                const username = localStorage.getItem('username');
                 
                 if (!token || role !== 'admin') {
                     window.location.href = '/login';
                     return;
                 }
                 
+                this.currentUser = username;
                 this.fetchClients();
                 this.fetchTraffic();
+                this.fetchUsers();
                 
                 setInterval(() => {
                     this.fetchTraffic();
@@ -312,11 +482,14 @@
                     
                     if (response.ok) {
                         const newClient = await response.json();
+                        // Save returned config (contains PrivateKey) so we can show it without extra fetch
+                        if (newClient.config) newClient.config = newClient.config;
                         this.clients.push(newClient);
                         this.newClientName = '';
                         this.success = 'Client added successfully';
                         setTimeout(() => this.success = '', 3000);
-                        
+
+                        // If API returned config, display it directly to ensure PrivateKey is shown
                         this.showConfig(newClient);
                     } else {
                         const error = await response.json();
@@ -331,24 +504,45 @@
             
             async showConfig(client) {
                 try {
+                    // If the client object already contains a config (returned from create), use it
+                    if (client.config) {
+                        this.selectedConfig = client.config;
+                        this.selectedClientName = client.name;
+                        this.showConfigModal = true;
+
+                        // Wait for modal to render, then generate QR
+                        await this.$nextTick();
+                        setTimeout(() => {
+                            const qrContainer = document.getElementById('qrcode');
+                            if (qrContainer) {
+                                qrContainer.innerHTML = '';
+                                QRCode.toCanvas(qrContainer, client.config, { width: this.qrSize });
+                            }
+                        }, 50);
+                        return;
+                    }
+
                     const response = await fetch(`/api/user-config?public_key=${encodeURIComponent(client.public_key)}`, {
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('token')}`
                         }
                     });
-                    
+
                     if (response.ok) {
                         const data = await response.json();
                         this.selectedConfig = data.config;
                         this.selectedClientName = client.name;
                         this.showConfigModal = true;
-                        
+
+                        // Wait for modal to render, then generate QR
+                        await this.$nextTick();
                         setTimeout(() => {
-                            document.getElementById('qrcode').innerHTML = '';
-                            QRCode.toCanvas(document.getElementById('qrcode'), data.config, {
-                                width: 200
-                            });
-                        }, 100);
+                            const qrContainer = document.getElementById('qrcode');
+                            if (qrContainer) {
+                                qrContainer.innerHTML = '';
+                                QRCode.toCanvas(qrContainer, data.config, { width: this.qrSize });
+                            }
+                        }, 50);
                     } else {
                         this.error = 'Failed to get config';
                     }
@@ -455,10 +649,128 @@
 				}
 				this.setLimit(publicKey, Math.round(bytes));
 			},
+
+            // ========== USERS METHODS ==========
+            async fetchUsers() {
+                try {
+                    const response = await fetch('/api/users', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        this.users = await response.json();
+                    }
+                } catch (err) {
+                    this.error = 'Failed to fetch users';
+                }
+            },
+
+            async addUser() {
+                this.addingUser = true;
+                this.error = '';
+                this.success = '';
+
+                try {
+                    const response = await fetch('/api/users', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(this.newUser)
+                    });
+
+                    if (response.ok) {
+                        this.newUser = { username: '', password: '', role: 'user' };
+                        this.success = 'User created successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        this.fetchUsers();
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to create user';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to create user';
+                } finally {
+                    this.addingUser = false;
+                }
+            },
+
+            editUser(user) {
+                this.editingUser = { ...user, password: '' };
+                this.showEditModal = true;
+            },
+
+            async saveUser() {
+                this.savingUser = true;
+                this.error = '';
+                this.success = '';
+
+                try {
+                    const response = await fetch(`/api/users/${this.editingUser.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            username: this.editingUser.username || null,
+                            password: this.editingUser.password || null,
+                            role: this.editingUser.role || null
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.success = 'User updated successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        this.showEditModal = false;
+                        this.fetchUsers();
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to update user';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to update user';
+                } finally {
+                    this.savingUser = false;
+                }
+            },
+
+            deleteUserConfirm(user) {
+                if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) {
+                    return;
+                }
+                this.deleteUser(user.id);
+            },
+
+            async deleteUser(userId) {
+                try {
+                    const response = await fetch(`/api/users/${userId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        this.success = 'User deleted successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        this.fetchUsers();
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to delete user';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to delete user';
+                }
+            },
 			
             logout() {
                 localStorage.removeItem('token');
                 localStorage.removeItem('role');
+                localStorage.removeItem('username');
                 window.location.href = '/login';
             }
         }

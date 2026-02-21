@@ -68,6 +68,7 @@
                         if (data.access_token) {
                             localStorage.setItem('token', data.access_token);
                             localStorage.setItem('role', data.role);
+                            localStorage.setItem('username', this.username);
 
                             if (data.role === 'admin') {
                                 window.location.href = '/admin';

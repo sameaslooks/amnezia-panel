@@ -7,7 +7,7 @@ from urllib.parse import unquote
 from fastapi.staticfiles import StaticFiles
 import os
 
-from database import get_all_clients, set_client_limit, activate_client, deactivate_client, check_and_deactivate_overlimit
+from database import get_all_clients, set_client_limit, activate_client, deactivate_client, check_and_deactivate_overlimit, get_all_users, create_user, update_user, delete_user
 
 from auth import authenticate_user, create_access_token, decode_token
 from awg_manager import AWGManager
@@ -32,6 +32,15 @@ app.add_middleware(
 
 awg = AWGManager()
 
+def get_token_payload(request: Request):
+    """Helper функция для проверки и получения payload из токена"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    
+    token = auth_header.split(" ")[1]
+    return decode_token(token)
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -43,6 +52,16 @@ class TokenResponse(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+class UserUpdate(BaseModel):
+    username: str = None
+    password: str = None
+    role: str = None
 
 @app.post("/api/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
@@ -187,8 +206,8 @@ async def get_limits(request: Request):
 
 @app.post("/api/limits")
 async def set_limit(public_key: str, limit_bytes: int, request: Request):
-    payload = await verify_token(request)
-    if payload.get("role") != "admin":
+    payload = get_token_payload(request)
+    if not payload or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     
     from urllib.parse import unquote
@@ -205,8 +224,8 @@ async def set_limit(public_key: str, limit_bytes: int, request: Request):
 
 @app.post("/api/clients/{public_key}/activate")
 async def activate_client_endpoint(public_key: str, request: Request):
-    payload = await verify_token(request)
-    if payload.get("role") != "admin":
+    payload = get_token_payload(request)
+    if not payload or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     
     from urllib.parse import unquote
@@ -216,8 +235,8 @@ async def activate_client_endpoint(public_key: str, request: Request):
 
 @app.post("/api/clients/{public_key}/deactivate")
 async def deactivate_client_endpoint(public_key: str, request: Request):
-    payload = await verify_token(request)
-    if payload.get("role") != "admin":
+    payload = get_token_payload(request)
+    if not payload or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     
     from urllib.parse import unquote
@@ -237,12 +256,75 @@ async def cron_check_limits(request: Request):
 
 @app.post("/api/iptables/sync")
 async def sync_iptables(request: Request):
-    payload = await verify_token(request)
-    if payload.get("role") != "admin":
+    payload = get_token_payload(request)
+    if not payload or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     
     awg.sync_iptables_with_db()
     return {"message": "iptables synchronized"}
+
+# ========== USERS MANAGEMENT ==========
+
+@app.get("/api/users")
+async def get_users(request: Request):
+    """Получает список всех пользователей"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    return get_all_users()
+
+@app.post("/api/users")
+async def create_user_endpoint(user: UserCreate, request: Request):
+    """Создаёт нового пользователя"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    if create_user(user.username, user.password, user.role):
+        return {"message": "User created successfully"}
+    else:
+        raise HTTPException(status_code=400, detail="User already exists")
+
+@app.put("/api/users/{user_id}")
+async def update_user_endpoint(user_id: int, user: UserUpdate, request: Request):
+    """Обновляет пользователя"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    update_user(user_id, user.username, user.password, user.role)
+    return {"message": "User updated successfully"}
+
+@app.delete("/api/users/{user_id}")
+async def delete_user_endpoint(user_id: int, request: Request):
+    """Удаляет пользователя"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    delete_user(user_id)
+    return {"message": "User deleted successfully"}
 
 # HTML страницы
 @app.get("/")
@@ -260,6 +342,10 @@ async def admin_page():
 @app.get("/user")
 async def user_page():
     return FileResponse("/frontend/user.html")
+
+@app.get("/users")
+async def users_page():
+    return FileResponse("/frontend/users.html")
 
 if __name__ == "__main__":
     import uvicorn
