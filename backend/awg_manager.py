@@ -101,33 +101,6 @@ class AWGManager:
         
         return f"{base_ip}.254/32"
     
-    def _get_server_params(self, config: str) -> Dict:
-        """Извлекает параметры сервера из конфига"""
-        params = {
-            "public_key": "",
-            "endpoint": self._get_server_ip(),
-            "port": "32308",
-            "jc": "5",
-            "jmin": "50",
-            "jmax": "1000",
-            "dns": "1.1.1.1, 1.0.0.1"
-        }
-        
-        # Публичный ключ сервера
-        priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
-        if priv_match:
-            private_key = priv_match.group(1)
-            pubkey = self._exec_in_container(f"echo '{private_key}' | awg pubkey").strip()
-            params["public_key"] = pubkey
-        
-        # Параметры обфускации
-        for param in ['Jc', 'Jmin', 'Jmax']:
-            match = re.search(rf'{param}\s*=\s*(\d+)', config)
-            if match:
-                params[param.lower()] = match.group(1)
-        
-        return params
-    
     def _get_server_ip(self) -> str:
         """Получает внешний IP сервера"""
         try:
@@ -156,8 +129,8 @@ class AWGManager:
         peer_section = f"""
 [Peer]
 PublicKey = {public_key}
-AllowedIPs = {next_ip}
 PresharedKey = {psk}
+AllowedIPs = {next_ip}
 """
         new_config = config.rstrip() + "\n" + peer_section
         
@@ -213,14 +186,40 @@ PresharedKey = {psk}
         # Читаем текущий конфиг
         config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         
-        # Удаляем всю секцию с этим публичным ключом
-        # Ищем [Peer]...PublicKey = public_key... до следующего [Peer] или конца
-        import re
-        pattern = r'\n\[Peer\].*?' + re.escape(public_key) + r'.*?(?=\n\[Peer\]|\Z)'
-        new_config = re.sub(pattern, '', config, flags=re.DOTALL)
+        # Разбиваем на строки
+        lines = config.split('\n')
+        new_lines = []
+        skip = False
+        in_peer_section = False
         
-        # Очищаем лишние переносы
-        new_config = re.sub(r'\n{3,}', '\n\n', new_config)
+        for line in lines:
+            if line.startswith('[Peer]'):
+                # Начинаем новую секцию пира
+                in_peer_section = True
+                # Проверяем, не наш ли это пир (посмотрим следующие строки)
+                # Пока не знаем, поэтому добавляем временно
+                new_lines.append(line)
+            elif in_peer_section:
+                if f"PublicKey = {public_key}" in line:
+                    # Это наш пир - удаляем всю секцию (откатываем)
+                    # Удаляем последнюю добавленную строку [Peer]
+                    while new_lines and new_lines[-1] != '[Peer]':
+                        new_lines.pop()
+                    if new_lines and new_lines[-1] == '[Peer]':
+                        new_lines.pop()
+                    skip = True
+                elif not skip:
+                    # Не наш пир, оставляем
+                    new_lines.append(line)
+                # Если дошли до пустой строки или следующего [Peer] - сбрасываем флаги
+                if line.strip() == '' or line.startswith('['):
+                    in_peer_section = False
+                    skip = False
+            else:
+                # Вне секции пира - просто добавляем
+                new_lines.append(line)
+        
+        new_config = '\n'.join(new_lines)
         
         # Записываем новый конфиг
         self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
@@ -327,17 +326,12 @@ PresharedKey = {psk}
 
         # I1..I5 - preserve raw (may be long blob or empty)
         i1 = find(r'I1\s*=\s*(.*)', '')
-        i2 = find(r'I2\s*=\s*(.*)', '')
-        i3 = find(r'I3\s*=\s*(.*)', '')
-        i4 = find(r'I4\s*=\s*(.*)', '')
-        i5 = find(r'I5\s*=\s*(.*)', '')
 
         # ListenPort (use actual value if present)
         listen_port = find(r'ListenPort\s*=\s*(\d+)', '')
 
         # DNS from server params (fallback to common defaults)
-        server_params = self._get_server_params(config)
-        dns = server_params.get('dns', '1.1.1.1, 1.0.0.1')
+        dns = '1.1.1.1, 1.0.0.1'
 
         server_host = self._get_server_ip()
 
@@ -375,14 +369,6 @@ PresharedKey = {psk}
         # Only include I1..I5 if non-empty
         if i1 and i1.strip():
             iface_lines.append(f"I1 = {i1}")
-        if i2 and i2.strip():
-            iface_lines.append(f"I2 = {i2}")
-        if i3 and i3.strip():
-            iface_lines.append(f"I3 = {i3}")
-        if i4 and i4.strip():
-            iface_lines.append(f"I4 = {i4}")
-        if i5 and i5.strip():
-            iface_lines.append(f"I5 = {i5}")
 
         iface_lines.append("")
         iface = "\n".join(iface_lines)
@@ -571,8 +557,14 @@ PresharedKey = {psk}
         import re
         from collections import OrderedDict
 
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         server_ip = self._get_server_ip()
+
+        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+
+        # Получаем порт из конфига
+        port_match = re.search(r'ListenPort\s*=\s*(\d+)', config)
+        server_port = port_match.group(1)
+        # Публичный ключ сервера из конфига
         priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
         server_public = ""
         if priv_match:
@@ -595,7 +587,17 @@ PresharedKey = {psk}
         h3   = get(r'H3\s*=\s*(\S+)', "2136624118-2143715549")
         h4   = get(r'H4\s*=\s*(\S+)', "2146343172-2146597914")
         i1   = get(r'I1\s*=\s*(.*)', "")
-        psk  = get(r'PresharedKey\s*=\s*(\S+)')
+        # В generate_amnezia_vpn_link() замените получение PSK:
+
+        # Ищем PSK для этого конкретного клиента
+        psk = ""
+        peers = config.split('[Peer]')[1:]
+        for peer in peers:
+            if client_public_key in peer:
+                psk_match = re.search(r'PresharedKey\s*=\s*(\S+)', peer)
+                if psk_match:
+                    psk = psk_match.group(1)
+                break
 
         inner_config = (
             "[Interface]\n"
@@ -623,10 +625,11 @@ PresharedKey = {psk}
             f"PublicKey = {server_public}\n"
             f"PresharedKey = {psk}\n"
             "AllowedIPs = 0.0.0.0/0, ::/0\n"
-            f"Endpoint = {server_ip}:32308\n"
+            f"Endpoint = {server_ip}:{server_port}\n"
             "PersistentKeepalive = 25\n"
         )
 
+        # 🔥 Жёсткий порядок ключей
         last_config = OrderedDict([
             ("H1", h1),
             ("H2", h2),
@@ -653,7 +656,7 @@ PresharedKey = {psk}
             ("hostName", server_ip),
             ("mtu", "1376"),
             ("persistent_keep_alive", "25"),
-            ("port", 32308),
+            ("port", int(server_port)),
             ("psk_key", psk),
             ("server_pub_key", server_public),
         ])
@@ -661,7 +664,7 @@ PresharedKey = {psk}
         last_config_str = json.dumps(
             last_config,
             indent=4,
-            separators=(',', ':'),
+            separators=(',', ': '),
             ensure_ascii=False
         )
 
@@ -686,7 +689,7 @@ PresharedKey = {psk}
                         ("S3", s3),
                         ("S4", s4),
                         ("last_config", last_config_str),
-                        ("port", "32308"),
+                        ("port", server_port),
                         ("protocol_version", "2"),
                         ("subnet_address", "10.8.1.0"),
                         ("transport_proto", "udp"),
@@ -701,8 +704,10 @@ PresharedKey = {psk}
             ("hostName", server_ip),
         ])
 
+        # 🔥 ВАЖНО: indent=4 на всём JSON
         json_str = json.dumps(server_config, indent=4, ensure_ascii=False)
 
+        # ДОБАВИТЬ ОБЯЗАТЕЛЬНО
         json_str += "\n"
         
         data = json_str.encode("utf-8")
