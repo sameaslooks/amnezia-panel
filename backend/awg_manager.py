@@ -182,27 +182,8 @@ class AWGManager:
         self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
         
         # Получаем параметры сервера для конфига клиента
-        server_params = self._get_server_params(config)
+        client_config = self.get_client_config(public_key)
         
-        # Формируем конфиг клиента
-        client_config = f"""[Interface]
-PrivateKey = {private_key}
-Address = {next_ip}
-DNS = {server_params['dns']}
-Jc = {server_params['jc']}
-Jmin = {server_params['jmin']}
-Jmax = {server_params['jmax']}  
-
-[Peer]
-PublicKey = {server_params['public_key']}
-"""
-        
-        if psk:
-            client_config += f"PresharedKey = {psk}\n"
-            
-        client_config += """AllowedIPs = 0.0.0.0/0, ::/0
-PersistentKeepalive = 25
-"""
         from database import create_client
         create_client(public_key, name, next_ip, private_key)
         # Save client config file inside the AWG container for later recovery
@@ -237,6 +218,7 @@ PersistentKeepalive = 25
             self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
         except:
             pass
+        
     def get_client_config(self, public_key: str) -> str:
         """Генерирует конфиг для клиента по его публичному ключу"""
         config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
@@ -555,3 +537,162 @@ PersistentKeepalive = 25
                 self.block_client(client['public_key'])
             else:
                 self.unblock_client(client['public_key'])
+    
+    def generate_amnezia_vpn_link(
+        self,
+        client_ip: str,
+        client_private_key: str,
+        client_public_key: str
+    ) -> str:
+        import json
+        import struct
+        import base64
+        import zlib
+        import re
+        from collections import OrderedDict
+
+        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        server_ip = self._get_server_ip()
+        priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
+        server_public = ""
+        if priv_match:
+            private_key = priv_match.group(1)
+            server_public = self._exec_in_container(f"echo '{private_key}' | awg pubkey").strip()
+
+        def get(pattern, default=""):
+            m = re.search(pattern, config)
+            return m.group(1).strip() if m else default
+
+        jc   = get(r'Jc\s*=\s*(\d+)', "5")
+        jmin = get(r'Jmin\s*=\s*(\d+)', "10")
+        jmax = get(r'Jmax\s*=\s*(\d+)', "50")
+        s1   = get(r'S1\s*=\s*(\d+)', "55")
+        s2   = get(r'S2\s*=\s*(\d+)', "34")
+        s3   = get(r'S3\s*=\s*(\d+)', "53")
+        s4   = get(r'S4\s*=\s*(\d+)', "9")
+        h1   = get(r'H1\s*=\s*(\S+)', "559719344-1124378331")
+        h2   = get(r'H2\s*=\s*(\S+)', "1356339249-1458644588")
+        h3   = get(r'H3\s*=\s*(\S+)', "2136624118-2143715549")
+        h4   = get(r'H4\s*=\s*(\S+)', "2146343172-2146597914")
+        i1   = get(r'I1\s*=\s*(.*)', "")
+        psk  = get(r'PresharedKey\s*=\s*(\S+)')
+
+        inner_config = (
+            "[Interface]\n"
+            f"Address = {client_ip}\n"
+            "DNS = 1.1.1.1, 1.0.0.1\n"
+            f"PrivateKey = {client_private_key}\n"
+            f"Jc = {jc}\n"
+            f"Jmin = {jmin}\n"
+            f"Jmax = {jmax}\n"
+            f"S1 = {s1}\n"
+            f"S2 = {s2}\n"
+            f"S3 = {s3}\n"
+            f"S4 = {s4}\n"
+            f"H1 = {h1}\n"
+            f"H2 = {h2}\n"
+            f"H3 = {h3}\n"
+            f"H4 = {h4}\n"
+            f"I1 = {i1}\n"
+            "I2 = \n"
+            "I3 = \n"
+            "I4 = \n"
+            "I5 = \n"
+            "\n"
+            "[Peer]\n"
+            f"PublicKey = {server_public}\n"
+            f"PresharedKey = {psk}\n"
+            "AllowedIPs = 0.0.0.0/0, ::/0\n"
+            f"Endpoint = {server_ip}:32308\n"
+            "PersistentKeepalive = 25\n"
+        )
+
+        # 🔥 Жёсткий порядок ключей
+        last_config = OrderedDict([
+            ("H1", h1),
+            ("H2", h2),
+            ("H3", h3),
+            ("H4", h4),
+            ("I1", i1),
+            ("I2", ""),
+            ("I3", ""),
+            ("I4", ""),
+            ("I5", ""),
+            ("Jc", jc),
+            ("Jmax", jmax),
+            ("Jmin", jmin),
+            ("S1", s1),
+            ("S2", s2),
+            ("S3", s3),
+            ("S4", s4),
+            ("allowed_ips", ["0.0.0.0/0", "::/0"]),
+            ("clientId", client_public_key),
+            ("client_ip", client_ip.split("/")[0]),
+            ("client_priv_key", client_private_key),
+            ("client_pub_key", client_public_key),
+            ("config", inner_config),
+            ("hostName", server_ip),
+            ("mtu", "1376"),
+            ("persistent_keep_alive", "25"),
+            ("port", 32308),
+            ("psk_key", psk),
+            ("server_pub_key", server_public),
+        ])
+
+        last_config_str = json.dumps(
+            last_config,
+            indent=4,
+            separators=(',', ':'),
+            ensure_ascii=False
+        )
+
+        server_config = OrderedDict([
+            ("containers", [
+                OrderedDict([
+                    ("awg", OrderedDict([
+                        ("H1", h1),
+                        ("H2", h2),
+                        ("H3", h3),
+                        ("H4", h4),
+                        ("I1", i1),
+                        ("I2", ""),
+                        ("I3", ""),
+                        ("I4", ""),
+                        ("I5", ""),
+                        ("Jc", jc),
+                        ("Jmax", jmax),
+                        ("Jmin", jmin),
+                        ("S1", s1),
+                        ("S2", s2),
+                        ("S3", s3),
+                        ("S4", s4),
+                        ("last_config", last_config_str),
+                        ("port", "32308"),
+                        ("protocol_version", "2"),
+                        ("subnet_address", "10.8.1.0"),
+                        ("transport_proto", "udp"),
+                    ])),
+                    ("container", "amnezia-awg2"),
+                ])
+            ]),
+            ("defaultContainer", "amnezia-awg2"),
+            ("description", "Amnezia VPN Server"),
+            ("dns1", "1.1.1.1"),
+            ("dns2", "1.0.0.1"),
+            ("hostName", server_ip),
+        ])
+
+        # 🔥 ВАЖНО: indent=4 на всём JSON
+        json_str = json.dumps(server_config, indent=4, ensure_ascii=False)
+
+        # ДОБАВИТЬ ОБЯЗАТЕЛЬНО
+        json_str += "\n"
+        
+        data = json_str.encode("utf-8")
+        compressed = zlib.compress(data, 8)
+        header = struct.pack(">I", len(data))
+        qt = header + compressed
+
+        b64 = base64.urlsafe_b64encode(qt).decode().rstrip("=")
+
+        return f"vpn://{b64}"
