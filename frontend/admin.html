@@ -377,7 +377,7 @@
                 
                 this.currentUser = username;
                 this.fetchAllData().then(() => {
-                    this.fetchTraffic();  // ← сразу после загрузки клиентов
+                    this.fetchTraffic();
                 });
                 
                 setInterval(() => {
@@ -414,56 +414,6 @@
                     }
                 } catch (err) {
                     this.error = 'Failed to load data';
-                }
-            },
-            
-            async fetchClients() {
-                try {
-                    const response = await fetch('/api/clients', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        const clientsData = await response.json();
-                        
-                        // Получаем лимиты из БД
-                        const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
-                        });
-                        
-                        if (limitsResponse.ok) {
-                            const limits = await limitsResponse.json();
-                            const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
-                            });
-                            
-                            // Объединяем с трафиком
-                            const trafficMap = {};
-                            this.traffic.forEach(t => {
-                                trafficMap[t.public_key] = t;
-                            });
-                            
-                            this.clients = clientsData.map(client => ({
-                                ...client,
-                                traffic: trafficMap[client.public_key]?.transfer || '0 B',
-                                handshake: trafficMap[client.public_key]?.latest_handshake || 'Never',
-                                limit: limitsMap[client.public_key]?.limit,
-                                used: limitsMap[client.public_key]?.used || 0,
-                                is_active: limitsMap[client.public_key]?.is_active !== false
-                            }));
-                        }
-                    } else if (response.status === 401) {
-                        this.logout();
-                    } else {
-                        this.error = 'Failed to fetch clients';
-                    }
-                } catch (err) {
-                    this.error = 'Failed to fetch clients';
                 }
             },
             
@@ -516,36 +466,6 @@
                     console.error('Failed to fetch traffic');
                 }
             },
-            
-			mergeTraffic() {
-				const trafficMap = {};
-				this.traffic.forEach(t => {
-					trafficMap[t.public_key] = t;
-				});
-				
-				// Сохраняем текущие лимиты перед обновлением
-				const currentLimits = {};
-				this.clients.forEach(c => {
-					currentLimits[c.public_key] = {
-						limit: c.limit,
-						used: c.used,
-						is_active: c.is_active
-					};
-				});
-				
-				// Обновляем только трафик, лимиты оставляем как есть
-				this.clients = this.clients.map(client => ({
-					...client,
-					traffic: trafficMap[client.public_key]?.transfer || '0 B',
-					handshake: trafficMap[client.public_key]?.latest_handshake || 'Never',
-					// Сохраняем лимиты из currentLimits, если они были
-					limit: currentLimits[client.public_key]?.limit || client.limit,
-					used: currentLimits[client.public_key]?.used || client.used || 0,
-					is_active: currentLimits[client.public_key]?.is_active !== undefined ? 
-							   currentLimits[client.public_key].is_active : 
-							   (client.is_active !== false)
-				}));
-			},
             
             async addClient() {
                 this.adding = true;
@@ -630,7 +550,7 @@
                     
                     if (linkResponse.ok) {
                         const linkData = await linkResponse.json();
-                        this.amneziaLink = linkData.link;  // ← сохраняем ссылку
+                        this.amneziaLink = linkData.link;
                     }
                     
                 } catch (err) {
@@ -726,7 +646,6 @@
                 }
             },
             
-			// Добавь эту функцию после setLimit
 			formatBytes(bytes) {
 				if (!bytes || bytes === 0) return '0 B';
 				const units = ['B', 'KB', 'MB', 'GB', 'TB'];

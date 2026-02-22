@@ -53,7 +53,7 @@ class AWGManager:
     
     def get_traffic(self) -> List[Dict]:
         """Получает статистику трафика из awg show"""
-        self.collect_traffic_stats()  # ← добавляем эту строку
+        self.collect_traffic_stats()
         
         output = self._exec_in_container("awg show")
         if not output:
@@ -169,7 +169,6 @@ AllowedIPs = {next_ip}
         create_client(public_key, name, next_ip, private_key)
         # Save client config file inside the AWG container for later recovery
         safe_path = f"/opt/amnezia/awg/client_configs"
-        # create directory and write file
         write_cmd = (
             f"mkdir -p {safe_path} && cat > {safe_path}/{public_key}.conf << 'EOF'\n{client_config}\nEOF"
         )
@@ -194,32 +193,36 @@ AllowedIPs = {next_ip}
         
         for line in lines:
             if line.startswith('[Peer]'):
-                # Начинаем новую секцию пира
                 in_peer_section = True
-                # Проверяем, не наш ли это пир (посмотрим следующие строки)
-                # Пока не знаем, поэтому добавляем временно
                 new_lines.append(line)
             elif in_peer_section:
                 if f"PublicKey = {public_key}" in line:
-                    # Это наш пир - удаляем всю секцию (откатываем)
-                    # Удаляем последнюю добавленную строку [Peer]
                     while new_lines and new_lines[-1] != '[Peer]':
                         new_lines.pop()
                     if new_lines and new_lines[-1] == '[Peer]':
                         new_lines.pop()
                     skip = True
                 elif not skip:
-                    # Не наш пир, оставляем
                     new_lines.append(line)
-                # Если дошли до пустой строки или следующего [Peer] - сбрасываем флаги
                 if line.strip() == '' or line.startswith('['):
                     in_peer_section = False
                     skip = False
             else:
-                # Вне секции пира - просто добавляем
                 new_lines.append(line)
         
-        new_config = '\n'.join(new_lines)
+        # Чистим множественные пустые строки
+        cleaned_lines = []
+        prev_empty = False
+        for line in new_lines:
+            if line.strip() == '':
+                if not prev_empty:
+                    cleaned_lines.append(line)
+                    prev_empty = True
+            else:
+                cleaned_lines.append(line)
+                prev_empty = False
+        
+        new_config = '\n'.join(cleaned_lines)
         
         # Записываем новый конфиг
         self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
@@ -347,7 +350,6 @@ AllowedIPs = {next_ip}
 
         psk_line = f"PresharedKey = {psk}\n" if psk else ""
 
-            # Build config lines, omitting empty I1..I5 lines
         iface_lines = [
             "[Interface]",
             f"Address = {client_ip}",
@@ -435,22 +437,6 @@ AllowedIPs = {next_ip}
         except:
             return 0
         return 0
-    
-    def _parse_bytes(self, size_str: str) -> int:
-        """Convert human-readable sizes like '1.23 GiB' to bytes."""
-        try:
-            s = size_str.strip()
-            if 'GiB' in s:
-                return int(float(s.replace('GiB', '').strip()) * 1024**3)
-            if 'MiB' in s:
-                return int(float(s.replace('MiB', '').strip()) * 1024**2)
-            if 'KiB' in s:
-                return int(float(s.replace('KiB', '').strip()) * 1024)
-            if 'B' in s:
-                return int(float(s.replace('B', '').strip()))
-        except Exception:
-            return 0
-        return 0
 
     def collect_traffic_stats(self):
         """Collect traffic from `awg show`, parse and update DB."""
@@ -534,8 +520,8 @@ AllowedIPs = {next_ip}
 
     def sync_iptables_with_db(self):
         """Синхронизирует iptables с базой данных"""
- 
-        # client["ip"] уже содержит /32, но нам нужно это проверить       from database import get_all_clients
+
+        from database import get_all_clients
         clients = get_all_clients()
         
         for client in clients:
@@ -587,7 +573,6 @@ AllowedIPs = {next_ip}
         h3   = get(r'H3\s*=\s*(\S+)', "2136624118-2143715549")
         h4   = get(r'H4\s*=\s*(\S+)', "2146343172-2146597914")
         i1   = get(r'I1\s*=\s*(.*)', "")
-        # В generate_amnezia_vpn_link() замените получение PSK:
 
         # Ищем PSK для этого конкретного клиента
         psk = ""
@@ -629,7 +614,6 @@ AllowedIPs = {next_ip}
             "PersistentKeepalive = 25\n"
         )
 
-        # 🔥 Жёсткий порядок ключей
         last_config = OrderedDict([
             ("H1", h1),
             ("H2", h2),
@@ -704,10 +688,8 @@ AllowedIPs = {next_ip}
             ("hostName", server_ip),
         ])
 
-        # 🔥 ВАЖНО: indent=4 на всём JSON
         json_str = json.dumps(server_config, indent=4, ensure_ascii=False)
 
-        # ДОБАВИТЬ ОБЯЗАТЕЛЬНО
         json_str += "\n"
         
         data = json_str.encode("utf-8")

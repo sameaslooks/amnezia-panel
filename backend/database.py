@@ -57,9 +57,7 @@ def init_db():
         c.execute("SELECT COUNT(*) FROM users")
         if c.fetchone()[0] == 0:
             c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                     ("admin", "admin123", "admin"))
-            c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                     ("user", "user123", "user"))
+                     ("admin", "admin", "admin"))
             conn.commit()
     except:
         pass
@@ -315,14 +313,6 @@ def get_user_by_username(username: str):
             "role": result[2]
         }
     return None
-
-def reset_traffic_for_limit(public_key: str):
-    """Сбрасывает счётчик трафика при установке нового лимита"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('UPDATE clients SET traffic_used_bytes = 0 WHERE public_key = ?', (public_key,))
-    conn.commit()
-    conn.close()
 
 # Инициализация при импорте
 init_db()
