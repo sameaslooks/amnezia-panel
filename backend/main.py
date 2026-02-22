@@ -326,6 +326,30 @@ async def delete_user_endpoint(user_id: int, request: Request):
     delete_user(user_id)
     return {"message": "User deleted successfully"}
 
+@app.get("/api/generate-link")
+async def generate_vpn_link(public_key: str, request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    from database import get_client
+    client = get_client(public_key)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    link = awg.generate_amnezia_vpn_link(
+        client_ip=client["ip"],
+        client_private_key=client["private_key"],
+        client_public_key=public_key
+    )
+    
+    return {"link": link}
+
 # HTML страницы
 @app.get("/")
 async def root():
