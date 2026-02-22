@@ -142,7 +142,7 @@ def update_traffic_usage(public_key: str, received: int, sent: int, awg_manager=
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    c.execute('SELECT traffic_limit_bytes, traffic_used_bytes, is_active FROM clientsTable WHERE public_key = ?', (public_key,))
+    c.execute('SELECT traffic_limit_bytes, traffic_used_bytes, is_active FROM clients WHERE public_key = ?', (public_key,))
     row = c.fetchone()
     if not row:
         conn.close()
