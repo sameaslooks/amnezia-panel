@@ -266,11 +266,27 @@
                             class="bg-white p-2 rounded shadow"
                             :width="qrSize"
                             :height="qrSize"></canvas>
+                    
+                    <!-- Amnezia VPN Link - ПЕРЕНЕСТИ СЮДА, ДО "Scan to import" -->
+                    <div class="w-full mt-3" x-show="amneziaLink">
+                        <div class="text-xs text-gray-600 mb-1">Amnezia VPN Link:</div>
+                        <div class="flex gap-1">
+                            <input type="text" 
+                                :value="amneziaLink" 
+                                class="flex-1 text-xs border rounded px-2 py-1 bg-gray-50"
+                                readonly
+                                @click="$event.target.select()">
+                            <button @click="copyToClipboard(amneziaLink)" 
+                                    class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                    
                     <div class="text-xs text-gray-600 mt-2 text-center">
                         Scan to import
                     </div>
                 </div>
-
             </div>
         </div>
 
@@ -346,6 +362,7 @@
             addingUser: false,
             savingUser: false,
             currentUser: '',
+            amneziaLink: '',
             qrSize: 400,  // QR code size in pixels (change here to adjust)
             
             init() {
@@ -359,27 +376,60 @@
                 }
                 
                 this.currentUser = username;
-                this.fetchClients();
-                this.fetchTraffic();
-                this.fetchUsers();
+                this.fetchAllData().then(() => {
+                    this.fetchTraffic();
+                });
                 
                 setInterval(() => {
                     this.fetchTraffic();
-                }, 3000);
+                }, 5000);
+            },
+
+            async fetchAllData() {
+                try {
+                    const token = localStorage.getItem('token');
+                    
+                    const [clientsRes, limitsRes, usersRes] = await Promise.all([
+                        fetch('/api/clients', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }),
+                    ]);
+                    
+                    if (clientsRes.ok && limitsRes.ok && usersRes.ok) {
+                        const clientsData = await clientsRes.json();
+                        const limits = await limitsRes.json();
+                        const users = await usersRes.json();
+                        
+                        const limitsMap = {};
+                        limits.forEach(l => limitsMap[l.public_key] = l);
+                        
+                        this.clients = clientsData.map(client => ({
+                            ...client,
+                            limit: limitsMap[client.public_key]?.limit,
+                            used: limitsMap[client.public_key]?.used || 0,
+                            is_active: limitsMap[client.public_key]?.is_active !== false
+                        }));
+                        
+                        this.users = users;
+                    }
+                } catch (err) {
+                    this.error = 'Failed to load data';
+                }
             },
             
-            async fetchClients() {
+            async fetchTraffic() {
                 try {
-                    const response = await fetch('/api/clients', {
+                    const response = await fetch('/api/traffic', {
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('token')}`
                         }
                     });
                     
                     if (response.ok) {
-                        const clientsData = await response.json();
+                        const trafficData = await response.json();
+                        this.traffic = trafficData;
                         
-                        // Получаем лимиты из БД
+                        // Получаем свежие лимиты и статусы
                         const limitsResponse = await fetch('/api/limits', {
                             headers: {
                                 'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -393,77 +443,29 @@
                                 limitsMap[l.public_key] = l;
                             });
                             
-                            // Объединяем с трафиком
                             const trafficMap = {};
-                            this.traffic.forEach(t => {
+                            trafficData.forEach(t => {
                                 trafficMap[t.public_key] = t;
                             });
                             
-                            this.clients = clientsData.map(client => ({
-                                ...client,
-                                traffic: trafficMap[client.public_key]?.transfer || '0 B',
-                                handshake: trafficMap[client.public_key]?.latest_handshake || 'Never',
-                                limit: limitsMap[client.public_key]?.limit,
-                                used: limitsMap[client.public_key]?.used || 0,
-                                is_active: limitsMap[client.public_key]?.is_active !== false
-                            }));
+                            this.clients = this.clients.map(client => {
+                                const t = trafficMap[client.public_key];
+                                const limitData = limitsMap[client.public_key];
+                                
+                                return {
+                                    ...client,
+                                    traffic: t?.transfer || '0 B',
+                                    handshake: t?.latest_handshake || 'Never',
+                                    used: limitData?.used || client.used,
+                                    is_active: limitData?.is_active !== false  // ← обновляем статус
+                                };
+                            });
                         }
-                    } else if (response.status === 401) {
-                        this.logout();
-                    } else {
-                        this.error = 'Failed to fetch clients';
                     }
                 } catch (err) {
-                    this.error = 'Failed to fetch clients';
+                    console.error('Failed to fetch traffic');
                 }
             },
-            
-			async fetchTraffic() {
-				try {
-					const response = await fetch('/api/traffic', {
-						headers: {
-							'Authorization': `Bearer ${localStorage.getItem('token')}`
-						}
-					});
-					
-					if (response.ok) {
-						this.traffic = await response.json();
-						this.mergeTraffic();  // ← этот вызов должен быть
-					}
-				} catch (err) {
-					console.error('Failed to fetch traffic');
-				}
-			},
-            
-			mergeTraffic() {
-				const trafficMap = {};
-				this.traffic.forEach(t => {
-					trafficMap[t.public_key] = t;
-				});
-				
-				// Сохраняем текущие лимиты перед обновлением
-				const currentLimits = {};
-				this.clients.forEach(c => {
-					currentLimits[c.public_key] = {
-						limit: c.limit,
-						used: c.used,
-						is_active: c.is_active
-					};
-				});
-				
-				// Обновляем только трафик, лимиты оставляем как есть
-				this.clients = this.clients.map(client => ({
-					...client,
-					traffic: trafficMap[client.public_key]?.transfer || '0 B',
-					handshake: trafficMap[client.public_key]?.latest_handshake || 'Never',
-					// Сохраняем лимиты из currentLimits, если они были
-					limit: currentLimits[client.public_key]?.limit || client.limit,
-					used: currentLimits[client.public_key]?.used || client.used || 0,
-					is_active: currentLimits[client.public_key]?.is_active !== undefined ? 
-							   currentLimits[client.public_key].is_active : 
-							   (client.is_active !== false)
-				}));
-			},
             
             async addClient() {
                 this.adding = true;
@@ -504,48 +506,53 @@
             
             async showConfig(client) {
                 try {
-                    // If the client object already contains a config (returned from create), use it
-                    if (client.config) {
-                        this.selectedConfig = client.config;
-                        this.selectedClientName = client.name;
-                        this.showConfigModal = true;
-
-                        // Wait for modal to render, then generate QR
-                        await this.$nextTick();
-                        setTimeout(() => {
-                            const qrContainer = document.getElementById('qrcode');
-                            if (qrContainer) {
-                                qrContainer.innerHTML = '';
-                                QRCode.toCanvas(qrContainer, client.config, { width: this.qrSize });
+                    let config = client.config;
+                    
+                    // Если нет конфига в клиенте - запрашиваем
+                    if (!config) {
+                        const response = await fetch(`/api/user-config?public_key=${encodeURIComponent(client.public_key)}`, {
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
                             }
-                        }, 50);
-                        return;
+                        });
+                        
+                        if (response.ok) {
+                            const data = await response.json();
+                            config = data.config;
+                        } else {
+                            this.error = 'Failed to get config';
+                            return;
+                        }
                     }
-
-                    const response = await fetch(`/api/user-config?public_key=${encodeURIComponent(client.public_key)}`, {
+                    
+                    this.selectedConfig = config;
+                    this.selectedClientName = client.name;
+                    this.showConfigModal = true;
+                    
+                    // Ждем рендера модалки
+                    await this.$nextTick();
+                    
+                    // Генерируем QR
+                    setTimeout(() => {
+                        const qrContainer = document.getElementById('qrcode');
+                        if (qrContainer) {
+                            qrContainer.innerHTML = '';
+                            QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
+                        }
+                    }, 50);
+                    
+                    // Запрашиваем Amnezia VPN ссылку
+                    const linkResponse = await fetch(`/api/generate-link?public_key=${encodeURIComponent(client.public_key)}`, {
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('token')}`
                         }
                     });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.selectedConfig = data.config;
-                        this.selectedClientName = client.name;
-                        this.showConfigModal = true;
-
-                        // Wait for modal to render, then generate QR
-                        await this.$nextTick();
-                        setTimeout(() => {
-                            const qrContainer = document.getElementById('qrcode');
-                            if (qrContainer) {
-                                qrContainer.innerHTML = '';
-                                QRCode.toCanvas(qrContainer, data.config, { width: this.qrSize });
-                            }
-                        }, 50);
-                    } else {
-                        this.error = 'Failed to get config';
+                    
+                    if (linkResponse.ok) {
+                        const linkData = await linkResponse.json();
+                        this.amneziaLink = linkData.link;
                     }
+                    
                 } catch (err) {
                     this.error = 'Failed to get config';
                 }
@@ -588,49 +595,57 @@
             },
 
             async setLimit(publicKey, limitBytes) {
-				try {
-					const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
-						method: 'POST',
-						headers: {
-							'Authorization': `Bearer ${localStorage.getItem('token')}`
-						}
-					});
-					
-					if (response.ok) {
-						this.success = 'Limit updated successfully';
-						setTimeout(() => this.success = '', 3000);
-						
-						// Обновляем данные
-						const limitsResponse = await fetch('/api/limits', {
-							headers: {
-								'Authorization': `Bearer ${localStorage.getItem('token')}`
-							}
-						});
-						
-						if (limitsResponse.ok) {
-							const limits = await limitsResponse.json();
-							const limitsMap = {};
-							limits.forEach(l => {
-								limitsMap[l.public_key] = l;
-							});
-							
-							this.clients = this.clients.map(client => ({
-								...client,
-								limit: limitsMap[client.public_key]?.limit,
-								used: limitsMap[client.public_key]?.used || 0,
-								is_active: limitsMap[client.public_key]?.is_active !== false
-							}));
-						}
-					} else {
-						const error = await response.json();
-						this.error = error.detail || 'Failed to set limit';
-					}
-				} catch (err) {
-					this.error = 'Failed to set limit';
-				}
-			},
+                try {
+                    const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        this.success = 'Limit updated successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        
+                        // Сохраняем текущие значения трафика
+                        const currentTraffic = {};
+                        this.clients.forEach(c => {
+                            currentTraffic[c.public_key] = {
+                                traffic: c.traffic,
+                                handshake: c.handshake
+                            };
+                        });
+                        
+                        // Обновляем данные
+                        const limitsResponse = await fetch('/api/limits', {
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            }
+                        });
+                        
+                        if (limitsResponse.ok) {
+                            const limits = await limitsResponse.json();
+                            const limitsMap = {};
+                            limits.forEach(l => {
+                                limitsMap[l.public_key] = l;
+                            });
+                            
+                            this.clients = this.clients.map(client => ({
+                                ...client,
+                                limit: limitsMap[client.public_key]?.limit,
+                                used: limitsMap[client.public_key]?.used || 0,
+                                is_active: limitsMap[client.public_key]?.is_active !== false,
+                                // Сохраняем трафик из currentTraffic
+                                traffic: currentTraffic[client.public_key]?.traffic || client.traffic,
+                                handshake: currentTraffic[client.public_key]?.handshake || client.handshake
+                            }));
+                        }
+                    }
+                } catch (err) {
+                    this.error = 'Failed to set limit';
+                }
+            },
             
-			// Добавь эту функцию после setLimit
 			formatBytes(bytes) {
 				if (!bytes || bytes === 0) return '0 B';
 				const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -765,6 +780,39 @@
                 } catch (err) {
                     this.error = 'Failed to delete user';
                 }
+            },
+
+            copyToClipboard(text) {
+                // Проверяем доступность clipboard API
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.success = 'Link copied!';
+                        setTimeout(() => this.success = '', 2000);
+                    }).catch(() => {
+                        // Fallback
+                        this.fallbackCopy(text);
+                    });
+                } else {
+                    // Fallback для старых браузеров/не HTTPS
+                    this.fallbackCopy(text);
+                }
+            },
+
+            fallbackCopy(text) {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    this.success = 'Link copied!';
+                    setTimeout(() => this.success = '', 2000);
+                } catch (err) {
+                    this.error = 'Failed to copy';
+                }
+                document.body.removeChild(textarea);
             },
 			
             logout() {
