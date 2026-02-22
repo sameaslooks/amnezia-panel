@@ -152,12 +152,20 @@ class AWGManager:
         # Определяем следующий IP
         next_ip = self._get_next_ip(config)
         
-        # Добавляем пира через awg set с PSK (используя файловый дескриптор)
-        add_command = f"awg set awg0 peer {public_key} allowed-ips {next_ip} preshared-key <(echo '{psk}')"
-        self._exec_in_container(add_command)
+        # Добавляем секцию пира в конфиг (с PSK)
+        peer_section = f"""
+[Peer]
+PublicKey = {public_key}
+AllowedIPs = {next_ip}
+PresharedKey = {psk}
+"""
+        new_config = config.rstrip() + "\n" + peer_section
         
-        # Сохраняем конфиг
-        self._exec_in_container("awg showconf awg0 > /opt/amnezia/awg/awg0.conf")
+        # Записываем новый конфиг в файл
+        self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
+        
+        # Синхронизируем интерфейс с файлом
+        self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         
         # Добавляем запись в clientsTable
         table_json = self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
@@ -202,11 +210,23 @@ class AWGManager:
     
     def delete_client(self, public_key: str):
         """Удаляет клиента"""
-        # Удаляем пир через awg set
-        self._exec_in_container(f"awg set awg0 peer {public_key} remove")
+        # Читаем текущий конфиг
+        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         
-        # Сохраняем конфиг
-        self._exec_in_container("awg showconf awg0 > /opt/amnezia/awg/awg0.conf")
+        # Удаляем всю секцию с этим публичным ключом
+        # Ищем [Peer]...PublicKey = public_key... до следующего [Peer] или конца
+        import re
+        pattern = r'\n\[Peer\].*?' + re.escape(public_key) + r'.*?(?=\n\[Peer\]|\Z)'
+        new_config = re.sub(pattern, '', config, flags=re.DOTALL)
+        
+        # Очищаем лишние переносы
+        new_config = re.sub(r'\n{3,}', '\n\n', new_config)
+        
+        # Записываем новый конфиг
+        self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
+        
+        # Синхронизируем интерфейс с файлом
+        self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         
         # Удаляем из clientsTable
         table_json = self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
@@ -218,7 +238,7 @@ class AWGManager:
             self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
         except:
             pass
-        
+
     def get_client_config(self, public_key: str) -> str:
         """Генерирует конфиг для клиента по его публичному ключу"""
         config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
@@ -607,7 +627,6 @@ class AWGManager:
             "PersistentKeepalive = 25\n"
         )
 
-        # 🔥 Жёсткий порядок ключей
         last_config = OrderedDict([
             ("H1", h1),
             ("H2", h2),
@@ -682,10 +701,8 @@ class AWGManager:
             ("hostName", server_ip),
         ])
 
-        # 🔥 ВАЖНО: indent=4 на всём JSON
         json_str = json.dumps(server_config, indent=4, ensure_ascii=False)
 
-        # ДОБАВИТЬ ОБЯЗАТЕЛЬНО
         json_str += "\n"
         
         data = json_str.encode("utf-8")
