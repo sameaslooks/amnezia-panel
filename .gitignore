@@ -27,3 +27,8 @@ Thumbs.db
 
 # Nginx
 nginx.conf
+
+#SSH
+/keys/*
+
+!.gitkeep

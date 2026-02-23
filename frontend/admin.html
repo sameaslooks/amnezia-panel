@@ -59,53 +59,158 @@
                 <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                     <h2 class="text-lg font-bold mb-4">Add New Server</h2>
                     
-                    <!-- Основные поля -->
-                    <div class="grid grid-cols-1 md:grid-cols-5 gap-2">
-                        <input type="text" x-model="newServer.name"
-                            placeholder="Name (e.g. 'Finland')" required>
-                        <input type="text" x-model="newServer.host"
-                            placeholder="Host/IP" required>
-                        <input type="text" x-model="newServer.port"
-                            placeholder="Port" value="22">
-                        <input type="text" x-model="newServer.user"
-                            placeholder="User" value="root">
-                        <input type="text" x-model="newServer.ssh_key_path"
-                            placeholder="Path to SSH key" required>
-                    </div>
-                    
-                    <!-- Кнопка тестирования подключения -->
-                    <div class="mt-4 flex gap-2">
-                        <button @click="testServerConnection"
-                                class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-                                :disabled="testingConnection">
-                            <span x-show="!testingConnection">🔌 Test Connection</span>
-                            <span x-show="testingConnection">Testing...</span>
-                        </button>
-                    </div>
-                    
-                    <!-- Модалка для ввода парольной фразы (появляется при необходимости) -->
-                    <div x-show="showPassphraseModal" class="mt-4 p-4 border border-yellow-300 bg-yellow-50 rounded">
-                        <h3 class="font-bold mb-2">🔐 SSH Key Passphrase Required</h3>
-                        <p class="text-sm mb-2">Enter passphrase for key: <span x-text="newServer.ssh_key_path"></span></p>
-                        <input type="password" x-model="passphrase"
-                            class="w-full px-3 py-2 border border-gray-300 rounded mb-2"
-                            placeholder="Enter passphrase">
+                    <form @submit.prevent="addServer">
+                        <!-- Основные поля -->
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4">
+                            <input type="text" x-model="newServer.name"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Name (e.g. 'Finland')" required>
+                            
+                            <input type="text" x-model="newServer.host"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Host/IP" required>
+                            
+                            <input type="number" x-model="newServer.port"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Port" value="22">
+                            
+                            <input type="text" x-model="newServer.user"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="User" value="root">
+                            
+                            <input type="text" x-model="newServer.ssh_key_path"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Path to SSH key" required>
+                        </div>
+
+                        <div x-show="needsSudoPassword" class="mt-2 mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">🔐 Sudo Password</label>
+                            <input type="password" x-model="newServer.sudo_password"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded"
+                                    placeholder="Enter sudo password">
+                            <p class="text-xs text-gray-500 mt-1">Required for commands that need root privileges</p>
+                        </div>
+                        
+                        <!-- Кнопки действий -->
                         <div class="flex gap-2">
-                            <button @click="submitPassphrase"
-                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
-                                Submit
+                            <button type="button" @click="testServerConnection"
+                                    class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                                    :disabled="testingConnection">
+                                <span x-show="!testingConnection">🔌 Test Connection</span>
+                                <span x-show="testingConnection">Testing...</span>
                             </button>
-                            <button @click="showPassphraseModal = false"
-                                    class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
-                                Cancel
+                            
+                            <button type="submit"
+                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                                    :disabled="addingServer">
+                                <span x-show="!addingServer">➕ Add Server</span>
+                                <span x-show="addingServer">Adding...</span>
                             </button>
                         </div>
-                    </div>
+                        
+                        <!-- Модалка для ввода парольной фразы -->
+                        <div x-show="showPassphraseModal" class="mt-4 p-4 border border-yellow-300 bg-yellow-50 rounded">
+                            <h3 class="font-bold mb-2">🔐 SSH Key Passphrase Required</h3>
+                            <p class="text-sm mb-2">Enter passphrase for key: <span x-text="newServer.ssh_key_path" class="font-mono"></span></p>
+                            
+                            <input type="password" x-model="passphrase"
+                                class="w-full px-3 py-2 border border-gray-300 rounded mb-2"
+                                placeholder="Enter passphrase">
+                            
+                            <div class="flex gap-2">
+                                <button type="button" @click="submitPassphrase"
+                                        class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                                    Submit
+                                </button>
+                                <button type="button" @click="showPassphraseModal = false; passphrase = ''"
+                                        class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Результат тестирования -->
+                        <template x-if="connectionTestResult">
+                            <div class="mt-4 p-4 rounded whitespace-pre-line"
+                                :class="connectionTestResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                                <p x-text="connectionTestResult.message"></p>
+                            </div>
+                        </template>
+                    </form>
+                </div>
+
+                <!-- Модалка с логами деплоя -->
+                <div x-show="showDeployModal" 
+                    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    @click.self="showDeployModal = false">
                     
-                    <!-- Результат тестирования -->
-                    <div x-show="connectionTestResult" class="mt-4 p-4 rounded"
-                        :class="connectionTestResult.success ? 'bg-green-100' : 'bg-red-100'">
-                        <p x-text="connectionTestResult.message"></p>
+                    <div class="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[80vh] flex flex-col">
+                        <!-- Заголовок -->
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold">🚀 Deployment Logs</h3>
+                            <button @click="showDeployModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        </div>
+                        
+                        <!-- Логи деплоя - увеличена высота, улучшен скролл -->
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-sm overflow-y-auto flex-1"
+                            style="min-height: 400px; max-height: 60vh;"
+                            x-ref="deployLogs"
+                            @scroll="handleLogScroll">
+                            
+                            <!-- Строки логов -->
+                            <template x-for="line in deployLogs" :key="line.id">
+                                <div x-text="line.text"
+                                    :class="{
+                                        'text-green-400': line.text.includes('✅'),
+                                        'text-red-400': line.text.includes('❌'),
+                                        'text-yellow-400': line.text.includes('🔄'),
+                                        'text-blue-400': line.text.includes('🔹'),
+                                        'text-purple-400': line.text.includes('📦'),
+                                        'font-bold': line.text.includes('🎉') || line.text.includes('DEPLOY_COMPLETE')
+                                    }"
+                                    class="whitespace-pre-wrap break-words leading-5 py-0.5 border-b border-gray-800 last:border-0">
+                                </div>
+                            </template>
+                            
+                            <!-- Индикаторы статуса -->
+                            <div x-show="deployStatus === 'in_progress' && deployLogs.length === 0" 
+                                class="text-yellow-400 animate-pulse py-2">
+                                ⏳ Waiting for deployment to start...
+                            </div>
+                            
+                            <div x-show="deployStatus === 'in_progress' && deployLogs.length > 0" 
+                                class="text-yellow-400 animate-pulse py-2 mt-2 border-t border-gray-700">
+                                ⏳ Deployment in progress...
+                            </div>
+                            
+                            <div x-show="deployStatus === 'complete'" 
+                                class="text-green-400 font-bold py-2 mt-2 border-t border-gray-700">
+                                🎉 Deployment completed successfully!
+                            </div>
+                            
+                            <div x-show="deployStatus === 'failed'" 
+                                class="text-red-400 font-bold py-2 mt-2 border-t border-gray-700">
+                                ❌ Deployment failed
+                            </div>
+                        </div>
+                        
+                        <!-- Кнопки действий -->
+                        <div class="flex justify-end mt-4 gap-2">
+                            <button @click="copyDeployLogs"
+                                    class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 flex items-center gap-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                                </svg>
+                                📋 Copy Logs
+                            </button>
+                            <button @click="showDeployModal = false"
+                                    class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 flex items-center gap-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                Close
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -136,8 +241,13 @@
                                         <td class="px-4 py-2" x-text="server.clients_count || 0"></td>
                                         <td class="px-4 py-2">
                                             <span class="px-2 py-1 rounded text-sm"
-                                                :class="server.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
-                                                x-text="server.status"></span>
+                                                :class="{
+                                                    'bg-green-100 text-green-800': server.status === 'active',
+                                                    'bg-yellow-100 text-yellow-800': server.status === 'maintenance',
+                                                    'bg-red-100 text-red-800': server.status === 'offline'
+                                                }"
+                                                x-text="server.status">
+                                            </span>
                                         </td>
                                         <td class="px-4 py-2" x-text="server.location || '—'"></td>
                                         <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(server.created_at).toLocaleDateString()"></td>
@@ -152,8 +262,31 @@
                                                 Delete
                                             </button>
                                         </td>
+                                        <td class="px-4 py-2">
+                                            <button @click="editServer(server)" 
+                                                    class="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 mr-2">
+                                                Edit
+                                            </button>
+                                            <button @click="deployServer(server)" 
+                                                    class="bg-purple-500 text-white px-3 py-1 rounded text-sm hover:bg-purple-600 mr-2"
+                                                    x-show="!server.container_deployed">
+                                                🚀 Deploy
+                                            </button>
+                                            <button @click="deleteServerConfirm(server)" 
+                                                    class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                                    :disabled="server.id === 1">
+                                                Delete
+                                            </button>
+                                        </td>
                                     </tr>
                                 </template>
+                                
+                                <!-- Пустое состояние -->
+                                <tr x-show="!servers.length">
+                                    <td colspan="9" class="px-4 py-8 text-center text-gray-500">
+                                        No servers added yet. Add your first server above.
+                                    </td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -571,13 +704,24 @@
             savingUser: false,
             currentUser: '',
             amneziaLink: '',
+
             editingServer: null,
             showEditServerModal: false,
+
             testingConnection: false,
             showPassphraseModal: false,
             passphrase: '',
             connectionTestResult: null,
             pendingServerData: null,
+            needsSudoPassword: false,
+
+            showDeployModal: false,
+            deployLogs: [],
+            deployWebSocket: null,
+            deployStatus: 'idle', // idle, in_progress, complete, failed
+            currentDeployId: null,
+            autoScroll: true,
+
 
             selectedConfig: '',
             selectedClientName: '',
@@ -587,7 +731,7 @@
 
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
-            newServer: { name: '', host: '', port: 22, user: 'root', ssh_key_path: '' },
+            newServer: { name: '', host: '', port: 22, user: 'root', ssh_key_path: '', sudo_password: '' },
 
             qrSize: 400,  // QR code size in pixels (change here to adjust)
             
@@ -1179,9 +1323,19 @@
                         this.showPassphraseModal = true;
                     } else if (result.success) {
                         // Подключение успешно!
+                        let message = `✅ Connected successfully!`;
+                        
+                        // 👇 ДОБАВЛЯЕМ ПРОВЕРКУ SUDO
+                        if (result.sudo === 'needs_password') {
+                            this.needsSudoPassword = true;
+                            message += `\n⚠️ Sudo password required for deployment`;
+                        } else {
+                            this.needsSudoPassword = false;
+                        }
+                        
                         this.connectionTestResult = {
                             success: true,
-                            message: `✅ Connected successfully!\nSystem: ${result.system_info}`
+                            message: message
                         };
                     } else {
                         // Ошибка подключения
@@ -1268,6 +1422,160 @@
                 } catch (err) {
                     this.error = 'Failed to add server';
                 }
+            },
+
+            async deployServer(server) {
+                if (!confirm(`Deploy AWG container on "${server.name}"? This may take a few minutes.`)) return;
+                
+                this.showDeployModal = true;
+                this.deployLogs = [];
+                this.deployStatus = 'in_progress';
+                this.autoScroll = true;
+                
+                try {
+                    // Запускаем деплой и получаем ID
+                    const response = await fetch(`/api/servers/${server.id}/deploy`, {
+                        method: 'POST',
+                        headers: {'Authorization': `Bearer ${localStorage.getItem('token')}`}
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to start deployment');
+                    }
+                    
+                    const data = await response.json();
+                    this.currentDeployId = data.deploy_id;
+                    
+                    // Подключаем WebSocket для получения логов
+                    this.connectDeployWebSocket();
+                    
+                } catch (err) {
+                    this.deployLogs.push({ 
+                        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                        text: `❌ Error: ${err.message}` 
+                    });
+                    this.deployStatus = 'failed';
+                }
+            },
+
+            connectDeployWebSocket() {
+                // Определяем протокол (wss для HTTPS, ws для HTTP)
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/deploy/${this.currentDeployId}`;
+                
+                console.log('🔄 Connecting to WebSocket:', wsUrl);
+                
+                // Создаём WebSocket соединение
+                this.deployWebSocket = new WebSocket(wsUrl);
+                
+                // Устанавливаем таймаут на случай, если соединение не устанавливается
+                const connectionTimeout = setTimeout(() => {
+                    if (this.deployWebSocket.readyState !== WebSocket.OPEN) {
+                        console.error('❌ WebSocket connection timeout');
+                        this.deployWebSocket.close();
+                        this.deployLogs.push({ 
+                            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                            text: '❌ Connection timeout. Please check if the server is reachable.' 
+                        });
+                        this.deployStatus = 'failed';
+                    }
+                }, 10000); // 10 секунд таймаут
+                
+                // Обработчик открытия соединения
+                this.deployWebSocket.onopen = () => {
+                    clearTimeout(connectionTimeout);
+                    console.log('✅ WebSocket connected');
+                    this.deployLogs.push({ 
+                        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                        text: '✅ Connected to deployment service\n' 
+                    });
+                };
+                
+                // Обработчик входящих сообщений (логов)
+                this.deployWebSocket.onmessage = (event) => {
+                    const line = event.data;
+                    
+                    // Добавляем лог с временной меткой
+                    this.deployLogs.push({ 
+                        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                        text: line 
+                    });
+                    
+                    // Проверяем статус завершения
+                    if (line.includes('DEPLOY_COMPLETE')) {
+                        this.deployStatus = 'complete';
+                        this.deployLogs.push({ 
+                            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                            text: '\n🎉 Deployment completed successfully!\n' 
+                        });
+                        
+                        // Закрываем соединение через 2 секунды после завершения
+                        setTimeout(() => {
+                            if (this.deployWebSocket) {
+                                this.deployWebSocket.close();
+                            }
+                        }, 2000);
+                        
+                        // Обновляем список серверов, чтобы показать статус контейнера
+                        this.fetchServers();
+                        
+                    } else if (line.includes('❌ Deploy failed')) {
+                        this.deployStatus = 'failed';
+                        this.deployLogs.push({ 
+                            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                            text: '\n❌ Deployment failed. Check the logs above for details.\n' 
+                        });
+                    }
+                    
+                    // Автоскролл вниз (если включён)
+                    if (this.autoScroll && this.$refs.deployLogs) {
+                        this.$nextTick(() => {
+                            const logDiv = this.$refs.deployLogs;
+                            logDiv.scrollTop = logDiv.scrollHeight;
+                        });
+                    }
+                };
+                
+                // Обработчик ошибок
+                this.deployWebSocket.onerror = (error) => {
+                    clearTimeout(connectionTimeout);
+                    console.error('❌ WebSocket error:', error);
+                    this.deployLogs.push({ 
+                        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                        text: '❌ WebSocket connection error. Please check:\n' +
+                            '  • The server is running\n' +
+                            '  • WebSocket endpoint is accessible\n' +
+                            '  • Network connectivity\n'
+                    });
+                    this.deployStatus = 'failed';
+                };
+                
+                // Обработчик закрытия соединения
+                this.deployWebSocket.onclose = (event) => {
+                    clearTimeout(connectionTimeout);
+                    console.log('🔌 WebSocket closed:', event.code, event.reason);
+                    
+                    if (this.deployStatus === 'in_progress') {
+                        this.deployLogs.push({ 
+                            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+                            text: '🔌 Connection closed unexpectedly. Deployment may be incomplete.' 
+                        });
+                        this.deployStatus = 'failed';
+                    }
+                    
+                    this.deployWebSocket = null;
+                };
+            },
+
+            handleLogScroll(event) {
+                const logDiv = event.target;
+                const isAtBottom = logDiv.scrollHeight - logDiv.scrollTop === logDiv.clientHeight;
+                this.autoScroll = isAtBottom;
+            },
+
+            copyDeployLogs() {
+                const logText = this.deployLogs.map(l => l.text).join('\n');
+                this.copyToClipboard(logText);
             },
 			
             logout() {
