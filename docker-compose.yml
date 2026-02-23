@@ -11,7 +11,6 @@ services:
     volumes:
       - ./frontend:/frontend
       - ./backend:/app
-      - ./keys:/keys:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - JWT_SECRET=${JWT_SECRET}
