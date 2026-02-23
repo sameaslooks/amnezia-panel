@@ -24,3 +24,6 @@ Thumbs.db
 # Docker
 *.tar
 *.gz
+
+# Nginx
+nginx.conf
