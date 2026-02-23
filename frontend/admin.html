@@ -22,6 +22,11 @@
                 
                 <!-- Tabs -->
                 <div class="flex border-b">
+                    <button @click="activeTab = 'servers'"
+                            :class="activeTab === 'servers' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
+                            class="py-3 px-4 font-medium transition">
+                        Servers
+                    </button>
                     <button @click="activeTab = 'clients'"
                             :class="activeTab === 'clients' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
                             class="py-3 px-4 font-medium transition">
@@ -47,6 +52,113 @@
             <div x-show="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
                 <span x-text="success"></span>
             </div>
+            
+            <!-- SERVERS TAB -->
+            <div x-show="activeTab === 'servers'">
+                <!-- Add Server Form -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h2 class="text-lg font-bold mb-4">Add New Server</h2>
+                    
+                    <!-- Основные поля -->
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-2">
+                        <input type="text" x-model="newServer.name"
+                            placeholder="Name (e.g. 'Finland')" required>
+                        <input type="text" x-model="newServer.host"
+                            placeholder="Host/IP" required>
+                        <input type="text" x-model="newServer.port"
+                            placeholder="Port" value="22">
+                        <input type="text" x-model="newServer.user"
+                            placeholder="User" value="root">
+                        <input type="text" x-model="newServer.ssh_key_path"
+                            placeholder="Path to SSH key" required>
+                    </div>
+                    
+                    <!-- Кнопка тестирования подключения -->
+                    <div class="mt-4 flex gap-2">
+                        <button @click="testServerConnection"
+                                class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                                :disabled="testingConnection">
+                            <span x-show="!testingConnection">🔌 Test Connection</span>
+                            <span x-show="testingConnection">Testing...</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Модалка для ввода парольной фразы (появляется при необходимости) -->
+                    <div x-show="showPassphraseModal" class="mt-4 p-4 border border-yellow-300 bg-yellow-50 rounded">
+                        <h3 class="font-bold mb-2">🔐 SSH Key Passphrase Required</h3>
+                        <p class="text-sm mb-2">Enter passphrase for key: <span x-text="newServer.ssh_key_path"></span></p>
+                        <input type="password" x-model="passphrase"
+                            class="w-full px-3 py-2 border border-gray-300 rounded mb-2"
+                            placeholder="Enter passphrase">
+                        <div class="flex gap-2">
+                            <button @click="submitPassphrase"
+                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                                Submit
+                            </button>
+                            <button @click="showPassphraseModal = false"
+                                    class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Результат тестирования -->
+                    <div x-show="connectionTestResult" class="mt-4 p-4 rounded"
+                        :class="connectionTestResult.success ? 'bg-green-100' : 'bg-red-100'">
+                        <p x-text="connectionTestResult.message"></p>
+                    </div>
+                </div>
+
+                <!-- Servers Table -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Name</th>
+                                    <th class="px-4 py-2 text-left">Host</th>
+                                    <th class="px-4 py-2 text-left">Port</th>
+                                    <th class="px-4 py-2 text-left">User</th>
+                                    <th class="px-4 py-2 text-left">Clients</th>
+                                    <th class="px-4 py-2 text-left">Status</th>
+                                    <th class="px-4 py-2 text-left">Location</th>
+                                    <th class="px-4 py-2 text-left">Created</th>
+                                    <th class="px-4 py-2 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="server in servers" :key="server.id">
+                                    <tr class="border-t">
+                                        <td class="px-4 py-2" x-text="server.name"></td>
+                                        <td class="px-4 py-2" x-text="server.host"></td>
+                                        <td class="px-4 py-2" x-text="server.port"></td>
+                                        <td class="px-4 py-2" x-text="server.user"></td>
+                                        <td class="px-4 py-2" x-text="server.clients_count || 0"></td>
+                                        <td class="px-4 py-2">
+                                            <span class="px-2 py-1 rounded text-sm"
+                                                :class="server.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                                x-text="server.status"></span>
+                                        </td>
+                                        <td class="px-4 py-2" x-text="server.location || '—'"></td>
+                                        <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(server.created_at).toLocaleDateString()"></td>
+                                        <td class="px-4 py-2">
+                                            <button @click="editServer(server)" 
+                                                    class="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 mr-2">
+                                                Edit
+                                            </button>
+                                            <button @click="deleteServerConfirm(server)" 
+                                                    class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                                                    :disabled="server.id === 1">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
 
             <!-- CLIENTS TAB -->
             <div x-show="activeTab === 'clients'">
@@ -54,10 +166,20 @@
                 <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                     <h2 class="text-lg font-bold mb-4">Add New Client</h2>
                     <form @submit.prevent="addClient">
-                        <div class="flex gap-2 max-w-md">
+                        <div class="flex gap-2">
                             <input type="text" x-model="newClientName"
-                                   class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                   placeholder="Client name (e.g. 'iPhone 15')" required>
+                                class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Client name (e.g. 'iPhone 15')" required>
+                            
+                            <!-- Server selection dropdown -->
+                            <select x-model="selectedServerForNewClient"
+                                    class="w-48 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                <option value="">Local server</option>
+                                <template x-for="server in servers" :key="server.id">
+                                    <option :value="server.id" x-text="server.name"></option>
+                                </template>
+                            </select>
+                            
                             <button type="submit" 
                                     class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
                                     :disabled="adding">
@@ -66,6 +188,18 @@
                             </button>
                         </div>
                     </form>
+                </div>
+                
+                <!-- Filter by Server -->
+                <div class="mb-4 flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700">Filter by server:</label>
+                    <select x-model="selectedServerFilter" @change="filterClientsByServer" 
+                            class="px-3 py-1 border border-gray-300 rounded text-sm">
+                        <option value="">All servers</option>
+                        <template x-for="server in servers" :key="server.id">
+                            <option :value="server.id" x-text="server.name"></option>
+                        </template>
+                    </select>
                 </div>
 
                 <!-- Clients Table -->
@@ -93,6 +227,13 @@
 									<td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
 									<td class="px-4 py-2" x-text="client.traffic || 'N/A'"></td>
 									
+                                    <td class="px-4 py-2">
+                                        <span x-text="getServerName(client.server_id)" 
+                                            class="px-2 py-1 rounded text-xs"
+                                            :class="client.server_id === 1 ? 'bg-gray-100 text-gray-800' : 'bg-blue-100 text-blue-800'">
+                                        </span>
+                                    </td>
+
 									<!-- Limit column -->
 									<td class="px-4 py-2">
 										<div x-data="{ editing: false, newLimit: client.limit ? client.limit/1024/1024 : 0, unit: 'MB' }">
@@ -340,6 +481,74 @@
                 </form>
             </div>
         </div>
+
+        <!-- Edit Server Modal -->
+        <template x-if="showEditServerModal && editingServer">
+            <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                @click.self="showEditServerModal = false">
+                <div class="bg-white rounded-lg p-6 max-w-md w-full">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold">Edit Server</h3>
+                        <button @click="showEditServerModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                    </div>
+                    <form @submit.prevent="updateServer">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Name</label>
+                                <input type="text" x-model="editingServer.name"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Host</label>
+                                <input type="text" x-model="editingServer.host"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Port</label>
+                                <input type="number" x-model="editingServer.port"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">User</label>
+                                <input type="text" x-model="editingServer.user"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">SSH Key Path</label>
+                                <input type="text" x-model="editingServer.ssh_key_path"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Location</label>
+                                <input type="text" x-model="editingServer.location"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded"
+                                    placeholder="e.g. Finland, Germany">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Status</label>
+                                <select x-model="editingServer.status"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded">
+                                    <option value="active">Active</option>
+                                    <option value="maintenance">Maintenance</option>
+                                    <option value="offline">Offline</option>
+                                </select>
+                            </div>
+                            <div class="flex gap-2 justify-end">
+                                <button type="button" @click="showEditServerModal = false"
+                                        class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
+                                    Cancel
+                                </button>
+                                <button type="submit"
+                                        class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </template>
+
     </div>
 
     <script>
@@ -348,21 +557,38 @@
             clients: [],
             traffic: [],
             users: [],
+            servers: [],
+            
             error: '',
             success: '',
+
             newClientName: '',
             adding: false,
+            addingServer: false,
             showConfigModal: false,
-            selectedConfig: '',
-            selectedClientName: '',
-            activeTab: 'clients',
-            newUser: { username: '', password: '', role: 'user' },
-            editingUser: { username: '', password: '', role: 'user' },
             showEditModal: false,
             addingUser: false,
             savingUser: false,
             currentUser: '',
             amneziaLink: '',
+            editingServer: null,
+            showEditServerModal: false,
+            testingConnection: false,
+            showPassphraseModal: false,
+            passphrase: '',
+            connectionTestResult: null,
+            pendingServerData: null,
+
+            selectedConfig: '',
+            selectedClientName: '',
+            selectedServerFilter: '',
+            selectedServerForNewClient: '',
+            activeTab: 'clients',
+
+            newUser: { username: '', password: '', role: 'user' },
+            editingUser: { username: '', password: '', role: 'user' },
+            newServer: { name: '', host: '', port: 22, user: 'root', ssh_key_path: '' },
+
             qrSize: 400,  // QR code size in pixels (change here to adjust)
             
             init() {
@@ -389,16 +615,20 @@
                 try {
                     const token = localStorage.getItem('token');
                     
-                    const [clientsRes, limitsRes, usersRes] = await Promise.all([
+                    const [clientsRes, limitsRes, usersRes, serversRes] = await Promise.all([
                         fetch('/api/clients', { headers: { 'Authorization': `Bearer ${token}` } }),
                         fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } }),
                         fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/servers', { headers: { 'Authorization': `Bearer ${token}` } })
                     ]);
                     
-                    if (clientsRes.ok && limitsRes.ok && usersRes.ok) {
+                    if (clientsRes.ok && limitsRes.ok && usersRes.ok && serversRes.ok) {
                         const clientsData = await clientsRes.json();
                         const limits = await limitsRes.json();
                         const users = await usersRes.json();
+                        const servers = await serversRes.json();
+                        
+                        this.servers = servers;
                         
                         const limitsMap = {};
                         limits.forEach(l => limitsMap[l.public_key] = l);
@@ -407,7 +637,8 @@
                             ...client,
                             limit: limitsMap[client.public_key]?.limit,
                             used: limitsMap[client.public_key]?.used || 0,
-                            is_active: limitsMap[client.public_key]?.is_active !== false
+                            is_active: limitsMap[client.public_key]?.is_active !== false,
+                            server_id: client.server_id || 1
                         }));
                         
                         this.users = users;
@@ -416,6 +647,110 @@
                     this.error = 'Failed to load data';
                 }
             },
+
+
+            async fetchServers() {
+                try {
+                    const response = await fetch('/api/servers', {
+                        headers: {'Authorization': `Bearer ${localStorage.getItem('token')}`}
+                    });
+                    if (response.ok) {
+                        this.servers = await response.json();
+                    }
+                } catch (err) {
+                    this.error = 'Failed to fetch servers';
+                }
+            },
+            
+            async addServer() {
+                this.addingServer = true;
+                try {
+                    const response = await fetch('/api/servers', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(this.newServer)
+                    });
+                    if (response.ok) {
+                        this.newServer = { name: '', host: '', port: 22, user: 'root', ssh_key_path: '' };
+                        this.success = 'Server added successfully';
+                        await this.fetchServers();
+                    }
+                } catch (err) {
+                    this.error = 'Failed to add server';
+                } finally {
+                    this.addingServer = false;
+                }
+            },
+            
+            editServer(server) {
+                this.editingServer = JSON.parse(JSON.stringify(server));
+                // Убеждаемся, что все поля существуют
+                if (!this.editingServer.port) this.editingServer.port = 22;
+                if (!this.editingServer.user) this.editingServer.user = 'root';
+                if (!this.editingServer.status) this.editingServer.status = 'active';
+                if (!this.editingServer.location) this.editingServer.location = '';
+                if (!this.editingServer.ssh_key_path) this.editingServer.ssh_key_path = '';
+                
+                // Открываем модалку
+                this.showEditServerModal = true;
+                
+                // Для отладки
+                console.log('Editing server:', this.editingServer);
+            },
+            
+            async updateServer() {
+                try {
+                    const response = await fetch(`/api/servers/${this.editingServer.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(this.editingServer)
+                    });
+                    if (response.ok) {
+                        this.showEditServerModal = false;
+                        await this.fetchServers();
+                    }
+                } catch (err) {
+                    this.error = 'Failed to update server';
+                }
+            },
+            
+            deleteServerConfirm(server) {
+                if (confirm(`Delete server "${server.name}"? All clients on this server must be deleted first.`)) {
+                    this.deleteServer(server.id);
+                }
+            },
+            
+            async deleteServer(serverId) {
+                try {
+                    const response = await fetch(`/api/servers/${serverId}`, {
+                        method: 'DELETE',
+                        headers: {'Authorization': `Bearer ${localStorage.getItem('token')}`}
+                    });
+                    if (response.ok) {
+                        await this.fetchServers();
+                    }
+                } catch (err) {
+                    this.error = 'Failed to delete server';
+                }
+            },
+            
+            getServerName(serverId) {
+                const server = this.servers.find(s => s.id === serverId);
+                return server ? server.name : 'Local';
+            },
+            
+            filterClientsByServer() {
+                // Этот метод будет вызываться при изменении фильтра
+                // Логика фильтрации будет на сервере, но можно и на клиенте
+                this.fetchClients();
+            },
+
             
             async fetchTraffic() {
                 try {
@@ -479,7 +814,10 @@
                             'Authorization': `Bearer ${localStorage.getItem('token')}`,
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ name: this.newClientName })
+                        body: JSON.stringify({ 
+                            name: this.newClientName,
+                            server_id: this.selectedServerForNewClient || null
+                        })
                     });
                     
                     if (response.ok) {
@@ -813,6 +1151,123 @@
                     this.error = 'Failed to copy';
                 }
                 document.body.removeChild(textarea);
+            },
+
+            async testServerConnection() {
+                this.testingConnection = true;
+                this.connectionTestResult = null;
+                
+                try {
+                    // Сначала пробуем подключиться без парольной фразы
+                    const response = await fetch('/api/servers/test-connection', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            ...this.newServer,
+                            passphrase: null  // пока без фразы
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.need_passphrase) {
+                        // Ключ требует парольную фразу
+                        this.pendingServerData = { ...this.newServer };
+                        this.showPassphraseModal = true;
+                    } else if (result.success) {
+                        // Подключение успешно!
+                        this.connectionTestResult = {
+                            success: true,
+                            message: `✅ Connected successfully!\nSystem: ${result.system_info}`
+                        };
+                    } else {
+                        // Ошибка подключения
+                        this.connectionTestResult = {
+                            success: false,
+                            message: `❌ Connection failed: ${result.error}`
+                        };
+                    }
+                } catch (err) {
+                    this.connectionTestResult = {
+                        success: false,
+                        message: `❌ Error: ${err.message}`
+                    };
+                } finally {
+                    this.testingConnection = false;
+                }
+            },
+
+            async submitPassphrase() {
+                this.showPassphraseModal = false;
+                this.testingConnection = true;
+                
+                try {
+                    const response = await fetch('/api/servers/test-connection', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            ...this.pendingServerData,
+                            passphrase: this.passphrase
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Если тест успешен, можно сохранять сервер
+                        this.connectionTestResult = {
+                            success: true,
+                            message: `✅ Connected successfully!\nSystem: ${result.system_info}`
+                        };
+                        
+                        // Автоматически добавляем сервер после успешного теста
+                        await this.addServerWithPassphrase(this.passphrase);
+                    } else {
+                        this.connectionTestResult = {
+                            success: false,
+                            message: `❌ Connection failed: ${result.error}`
+                        };
+                    }
+                } catch (err) {
+                    this.connectionTestResult = {
+                        success: false,
+                        message: `❌ Error: ${err.message}`
+                    };
+                } finally {
+                    this.testingConnection = false;
+                    this.passphrase = '';
+                    this.pendingServerData = null;
+                }
+            },
+
+            async addServerWithPassphrase(passphrase) {
+                try {
+                    const response = await fetch('/api/servers', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            ...this.pendingServerData,
+                            passphrase: passphrase  // передаём для проверки при сохранении
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        this.newServer = { name: '', host: '', port: 22, user: 'root', ssh_key_path: '' };
+                        this.success = 'Server added successfully';
+                        await this.fetchServers();
+                    }
+                } catch (err) {
+                    this.error = 'Failed to add server';
+                }
             },
 			
             logout() {

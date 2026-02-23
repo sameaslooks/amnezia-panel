@@ -364,6 +364,132 @@ async def generate_vpn_link(public_key: str, request: Request):
     
     return {"link": link}
 
+# ========== SERVERS MANAGEMENT ==========
+
+# ========== SERVERS MANAGEMENT ==========
+
+@app.get("/api/servers")
+async def get_servers(request: Request):
+    """Получает список всех серверов"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from database import get_all_servers
+    return get_all_servers()
+
+@app.post("/api/servers")
+async def create_server_endpoint(server: dict, request: Request):
+    """Создаёт новый сервер"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from database import create_server
+    server_id = create_server(server)
+    return {"id": server_id, "message": "Server created successfully"}
+
+@app.get("/api/servers/{server_id}")
+async def get_server_endpoint(server_id: int, request: Request):
+    """Получает данные конкретного сервера"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from database import get_server
+    server = get_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+    return server
+
+@app.put("/api/servers/{server_id}")
+async def update_server_endpoint(server_id: int, server: dict, request: Request):
+    """Обновляет данные сервера"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from database import update_server
+    update_server(server_id, server)
+    return {"message": "Server updated successfully"}
+
+@app.delete("/api/servers/{server_id}")
+async def delete_server_endpoint(server_id: int, request: Request):
+    """Удаляет сервер"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from database import delete_server
+    try:
+        delete_server(server_id)
+        return {"message": "Server deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/servers/{server_id}/clients")
+async def get_server_clients(server_id: int, request: Request):
+    """Получает клиентов конкретного сервера"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from database import get_clients_by_server
+    return get_clients_by_server(server_id)
+
+@app.post("/api/servers/test-connection")
+async def test_server_connection(server: dict, request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from ssh_manager import ssh_manager
+    
+    result = await ssh_manager.test_connection(
+        host=server["host"],
+        port=server.get("port", 22),
+        user=server.get("user", "root"),
+        ssh_key_path=server.get("ssh_key_path"),
+        passphrase=server.get("passphrase")
+    )
+    
+    return result
+
 # HTML страницы
 @app.get("/")
 async def root():
