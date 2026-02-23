@@ -124,8 +124,38 @@ class SSHManager:
             ("📦 Checking Docker", 
             "command -v docker || echo 'Docker not installed'"),
             
-            ("🔧 Installing Docker if needed", 
-            "command -v docker || (curl -fsSL https://get.docker.com | sh)"),
+            ("🔧 Checking Docker installation", 
+            "command -v docker && echo 'DOCKER_ALREADY_INSTALLED' || echo 'DOCKER_NEEDS_INSTALL'"),
+
+            ("🔧 Cleaning old Docker repository entries", 
+            "sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources"),
+
+            ("🔧 Setting up Docker repository", 
+            "if [ ! -f /etc/apt/keyrings/docker.asc ]; then "
+            "sudo apt update && "
+            "sudo apt install -y ca-certificates curl && "
+            "sudo install -m 0755 -d /etc/apt/keyrings && "
+            "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && "
+            "sudo chmod a+r /etc/apt/keyrings/docker.asc; "
+            "else echo 'Docker repository already configured'; fi"),
+
+            ("🔧 Adding Docker repository", 
+            "if [ ! -f /etc/apt/sources.list.d/docker.sources ]; then "
+            "CODENAME=$(lsb_release -cs) && "
+            "sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null << EOF\n"
+            "Types: deb\n"
+            "URIs: https://download.docker.com/linux/ubuntu\n"
+            "Suites: $CODENAME\n"
+            "Components: stable\n"
+            "Signed-By: /etc/apt/keyrings/docker.asc\n"
+            "EOF\n"
+            "else echo 'Docker repository already added'; fi"),
+
+            ("🔧 Installing Docker packages", 
+            "if ! command -v docker >/dev/null 2>&1; then "
+            "sudo apt update && "
+            "sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; "
+            "else echo 'Docker packages already installed'; fi"),
             
             ("📁 Creating directories", 
             "sudo mkdir -p /opt/amnezia/awg /opt/amnezia/backups"),
@@ -194,8 +224,11 @@ class SSHManager:
             
             ("📋 Generating keys", 
             "sudo docker exec amnezia-awg2 sh -c '"
-            "awg genkey | tee /opt/amnezia/awg/server_private.key && "
-            "cat /opt/amnezia/awg/server_private.key | awg pubkey | tee /opt/amnezia/awg/server_public.key"
+            "rm -f /opt/amnezia/awg/server_private.key /opt/amnezia/awg/server_public.key && "
+            "PRIVATE_KEY=$(awg genkey) && "
+            "echo \"$PRIVATE_KEY\" > /opt/amnezia/awg/server_private.key && "
+            "echo \"$PRIVATE_KEY\" | awg pubkey > /opt/amnezia/awg/server_public.key && "
+            "chmod 600 /opt/amnezia/awg/server_private.key /opt/amnezia/awg/server_public.key"
             "'"),
 
             ("📝 Creating server config", 
@@ -216,9 +249,39 @@ class SSHManager:
             "H2 = 2067003202-2073469039\n"
             "H3 = 2118455839-2136843295\n"
             "H4 = 2142407594-2142521231\n"
-            "#I1 = <b 0x084481800001000300000000077469636b65747306776964676574096b696e6f706f69736b0272750000010001c00c0005000100000039001806776964676574077469636b6574730679616e646578c025c0390005000100000039002b1765787465726e616c2d7469636b6574732d776964676574066166697368610679616e646578036e657400c05d000100010000001c000457fafe25>\n"
             "EOF\n"
-            "'")
+            "'"),
+
+            ("📝 Creating startup script", 
+            "sudo docker exec amnezia-awg2 sh -c '"
+            "cat > /opt/amnezia/start.sh << 'EOF'\n"
+            "#!/bin/bash\n\n"
+            "echo \"Container startup\"\n\n"
+            "# kill daemons in case of restart\n"
+            "awg-quick down /opt/amnezia/awg/awg0.conf 2>/dev/null || true\n\n"
+            "# start daemons if configured\n"
+            "if [ -f /opt/amnezia/awg/awg0.conf ]; then\n"
+            "    awg-quick up /opt/amnezia/awg/awg0.conf\n"
+            "fi\n\n"
+            "# Allow traffic on the TUN interface\n"
+            "iptables -A INPUT -i awg0 -j ACCEPT 2>/dev/null || true\n"
+            "iptables -A FORWARD -i awg0 -j ACCEPT 2>/dev/null || true\n"
+            "iptables -A OUTPUT -o awg0 -j ACCEPT 2>/dev/null || true\n\n"
+            "# Allow forwarding traffic only from the VPN\n"
+            "iptables -A FORWARD -i awg0 -o eth0 -s 10.8.1.0/24 -j ACCEPT 2>/dev/null || true\n"
+            "iptables -A FORWARD -i awg0 -o eth1 -s 10.8.1.0/24 -j ACCEPT 2>/dev/null || true\n\n"
+            "iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true\n\n"
+            "iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o eth0 -j MASQUERADE 2>/dev/null || true\n"
+            "iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o eth1 -j MASQUERADE 2>/dev/null || true\n\n"
+            "tail -f /dev/null\n"
+            "EOF\n"
+            "'"),
+
+            ("📝 Setting execute permission", 
+            "sudo docker exec amnezia-awg2 chmod +x /opt/amnezia/start.sh"),
+
+            ("🔄 Restarting container to apply startup script", 
+            "sudo docker restart amnezia-awg2"),
         ]
         
         conn = None
