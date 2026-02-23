@@ -1,9 +1,13 @@
 import jwt
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-SECRET_KEY = "your-secret-key-change-this"
+SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHM = "HS256"
+
+if SECRET_KEY == "your-secret-key-change-this":
+    print("⚠️ WARNING: Using default JWT secret! Set JWT_SECRET in production!")
 
 def authenticate_user(username: str, password: str):
     """Проверяет учётные данные пользователя"""

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from datetime import timedelta
 from urllib.parse import unquote
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 import os
 
 from database import get_all_clients, set_client_limit, activate_client, deactivate_client, check_and_deactivate_overlimit, get_all_users, create_user, update_user, delete_user
@@ -21,6 +22,18 @@ if os.path.exists(static_dir):
 else:
     print(f"Static directory {static_dir} not found")
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc):
+    # Логируем полную ошибку для себя в консоль
+    print(f"!!! Internal Error on {request.url.path}: {exc}")
+    # А клиенту отдаём общее сообщение
+    return JSONResponse(status_code=500, content={"detail": "Internal server error, please try again later."})
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +42,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 awg = AWGManager()
 
