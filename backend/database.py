@@ -49,51 +49,9 @@ def init_db():
             FOREIGN KEY (public_key) REFERENCES clients(public_key)
         )
     ''')
-
-    # Таблица серверов
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS servers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,              -- например, "Finland", "Germany"
-            host TEXT NOT NULL,               -- IP или домен
-            port INTEGER DEFAULT 22,
-            user TEXT DEFAULT 'root',
-            ssh_key_path TEXT,                -- путь к ключу на центральном сервере
-            status TEXT DEFAULT 'active',      -- active/offline/maintenance
-            location TEXT,                     -- страна/город для отображения
-            clients_count INTEGER DEFAULT 0,   -- кэш для удобства
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # Добавляем поле server_id в таблицу clients, если его нет - ВРЕМЕННО
-    try:
-        c.execute("ALTER TABLE clients ADD COLUMN server_id INTEGER REFERENCES servers(id);")
-        print("✅ Added server_id column to clients table")
-    except sqlite3.OperationalError:
-        pass
-
-    # Добавляем локальный сервер по умолчанию, если серверов ещё нет
-    c.execute("SELECT COUNT(*) FROM servers")
-    if c.fetchone()[0] == 0:
-        c.execute('''
-            INSERT INTO servers (name, host, port, user, ssh_key_path, status, location)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', ("Local server", "localhost", 22, "root", "", "active", "local"))
-        conn.commit()
-        print("✅ Added default local server")
-
-    # Привязываем существующих клиентов к локальному серверу, если они не привязаны
-    c.execute('''
-        UPDATE clients 
-        SET server_id = (SELECT id FROM servers WHERE name = 'Local server' LIMIT 1)
-        WHERE server_id IS NULL
-    ''')
     
     conn.commit()
-
-
-
+    
     # Инициализируем пользователей по умолчанию
     try:
         c.execute("SELECT COUNT(*) FROM users")
@@ -126,41 +84,22 @@ def get_client(public_key: str):
         }
     return None
 
-def create_client(public_key: str, name: str, ip: str, private_key: str = "", server_id: int = None):
+def create_client(public_key: str, name: str, ip: str, private_key: str = ""):
     """Создаёт запись о клиенте"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    
-    # Добавляем server_id в запрос
+    # Use UPSERT to ensure we save private_key even if a placeholder row exists
     c.execute('''
-        INSERT INTO clients (public_key, name, ip, private_key, server_id, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO clients (public_key, name, ip, private_key, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(public_key) DO UPDATE SET
             name=excluded.name,
             ip=excluded.ip,
-            server_id=excluded.server_id,
             private_key=CASE WHEN excluded.private_key IS NULL OR excluded.private_key = '' THEN clients.private_key ELSE excluded.private_key END,
             updated_at=CURRENT_TIMESTAMP
-    ''', (public_key, name, ip, private_key, server_id))
-    
+    ''', (public_key, name, ip, private_key))
     conn.commit()
     conn.close()
-
-def delete_client(public_key: str):
-    """Удаляет клиента"""
-    # Сначала получаем server_id клиента
-    client = get_client(public_key)
-    server_id = client.get("server_id") if client else None
-    
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('DELETE FROM clients WHERE public_key = ?', (public_key,))
-    conn.commit()
-    conn.close()
-    
-    # Уменьшаем счётчик на сервере
-    if server_id:
-        decrement_server_clients(server_id)
 
 def set_client_limit(public_key: str, limit_bytes: int):
     """Устанавливает лимит и синхронизирует iptables"""
@@ -374,157 +313,6 @@ def get_user_by_username(username: str):
             "role": result[2]
         }
     return None
-
-# ========== SERVERS MANAGEMENT ==========
-
-def get_all_servers():
-    """Получает список всех серверов"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        SELECT id, name, host, port, user, ssh_key_path, status, location, clients_count, created_at
-        FROM servers
-        ORDER BY created_at DESC
-    ''')
-    rows = c.fetchall()
-    conn.close()
-    
-    return [
-        {
-            "id": row[0],
-            "name": row[1],
-            "host": row[2],
-            "port": row[3],
-            "user": row[4],
-            "ssh_key_path": row[5],
-            "status": row[6],
-            "location": row[7],
-            "clients_count": row[8],
-            "created_at": row[9]
-        }
-        for row in rows
-    ]
-
-def get_server(server_id: int):
-    """Получает данные сервера по ID"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        SELECT id, name, host, port, user, ssh_key_path, status, location, clients_count, created_at
-        FROM servers WHERE id = ?
-    ''', (server_id,))
-    row = c.fetchone()
-    conn.close()
-    
-    if row:
-        return {
-            "id": row[0],
-            "name": row[1],
-            "host": row[2],
-            "port": row[3],
-            "user": row[4],
-            "ssh_key_path": row[5],
-            "status": row[6],
-            "location": row[7],
-            "clients_count": row[8],
-            "created_at": row[9]
-        }
-    return None
-
-def create_server(server_data: dict):
-    """Создаёт новый сервер"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    c.execute('''
-        INSERT INTO servers (name, host, port, user, ssh_key_path, status, location)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        server_data.get("name"),
-        server_data.get("host"),
-        server_data.get("port", 22),
-        server_data.get("user", "root"),
-        server_data.get("ssh_key_path"),
-        server_data.get("status", "active"),
-        server_data.get("location", "")
-    ))
-    
-    server_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return server_id
-
-def update_server(server_id: int, server_data: dict):
-    """Обновляет данные сервера"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    updates = []
-    values = []
-    
-    for field in ["name", "host", "port", "user", "ssh_key_path", "status", "location"]:
-        if field in server_data:
-            updates.append(f"{field} = ?")
-            values.append(server_data[field])
-    
-    if not updates:
-        conn.close()
-        return
-    
-    values.append(server_id)
-    c.execute(f'''
-        UPDATE servers 
-        SET {', '.join(updates)}
-        WHERE id = ?
-    ''', values)
-    
-    conn.commit()
-    conn.close()
-
-def delete_server(server_id: int):
-    """Удаляет сервер (только если нет клиентов)"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # Проверяем, есть ли клиенты на этом сервере
-    c.execute('SELECT COUNT(*) FROM clients WHERE server_id = ?', (server_id,))
-    count = c.fetchone()[0]
-    
-    if count > 0:
-        conn.close()
-        raise Exception(f"Cannot delete server with {count} clients")
-    
-    c.execute('DELETE FROM servers WHERE id = ?', (server_id,))
-    conn.commit()
-    conn.close()
-
-def increment_server_clients(server_id: int):
-    """Увеличивает счётчик клиентов на сервере"""
-    if not server_id:
-        return
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        UPDATE servers 
-        SET clients_count = clients_count + 1 
-        WHERE id = ?
-    ''', (server_id,))
-    conn.commit()
-    conn.close()
-
-def decrement_server_clients(server_id: int):
-    """Уменьшает счётчик клиентов на сервере"""
-    if not server_id:
-        return
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        UPDATE servers 
-        SET clients_count = clients_count - 1 
-        WHERE id = ?
-    ''', (server_id,))
-    conn.commit()
-    conn.close()
 
 # Инициализация при импорте
 init_db()

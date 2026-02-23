@@ -6,10 +6,7 @@ from datetime import timedelta
 from urllib.parse import unquote
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from fastapi import WebSocket, WebSocketDisconnect
 import os
-import asyncio
-import uuid
 
 from database import get_all_clients, set_client_limit, activate_client, deactivate_client, check_and_deactivate_overlimit, get_all_users, create_user, update_user, delete_user
 
@@ -17,43 +14,6 @@ from auth import authenticate_user, create_access_token, decode_token
 from awg_manager import AWGManager
 
 app = FastAPI(title="Amnezia Panel")
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: dict[str, WebSocket] = {}
-        self.deploy_tasks: dict[str, asyncio.Task] = {}
-    
-    async def connect(self, deploy_id: str, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections[deploy_id] = websocket
-        print(f"✅ WebSocket connected: {deploy_id}")
-    
-    def disconnect(self, deploy_id: str):
-        if deploy_id in self.active_connections:
-            del self.active_connections[deploy_id]
-        if deploy_id in self.deploy_tasks:
-            self.deploy_tasks[deploy_id].cancel()
-            del self.deploy_tasks[deploy_id]
-        print(f"🔌 WebSocket disconnected: {deploy_id}")
-    
-    async def send_log(self, deploy_id: str, message: str):
-        if deploy_id in self.active_connections:
-            try:
-                await self.active_connections[deploy_id].send_text(message)
-            except Exception as e:
-                print(f"❌ Error sending log: {e}")
-                self.disconnect(deploy_id)
-manager = ConnectionManager()
-
-@app.websocket("/ws/deploy/{deploy_id}")
-async def websocket_deploy(websocket: WebSocket, deploy_id: str):
-    await manager.connect(deploy_id, websocket)
-    try:
-        while True:
-            await websocket.receive_text()  # keep connection alive
-    except WebSocketDisconnect:
-        manager.disconnect(deploy_id)
-
 
 static_dir = "/frontend/static"
 if os.path.exists(static_dir):
@@ -173,11 +133,7 @@ async def create_client(client: ClientCreate, request: Request):
     if not payload or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     
-    # Получаем server_id из тела запроса (добавить в ClientCreate)
-    data = await request.json()
-    server_id = data.get("server_id")
-    
-    return awg.add_client(client.name, server_id)
+    return awg.add_client(client.name)
 
 @app.get("/api/traffic")
 async def get_traffic(request: Request):
@@ -407,176 +363,6 @@ async def generate_vpn_link(public_key: str, request: Request):
     )
     
     return {"link": link}
-
-# ========== SERVERS MANAGEMENT ==========
-
-# ========== SERVERS MANAGEMENT ==========
-
-@app.get("/api/servers")
-async def get_servers(request: Request):
-    """Получает список всех серверов"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_all_servers
-    return get_all_servers()
-
-@app.post("/api/servers")
-async def create_server_endpoint(server: dict, request: Request):
-    """Создаёт новый сервер"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import create_server
-    server_id = create_server(server)
-    return {"id": server_id, "message": "Server created successfully"}
-
-@app.get("/api/servers/{server_id}")
-async def get_server_endpoint(server_id: int, request: Request):
-    """Получает данные конкретного сервера"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_server
-    server = get_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
-    return server
-
-@app.put("/api/servers/{server_id}")
-async def update_server_endpoint(server_id: int, server: dict, request: Request):
-    """Обновляет данные сервера"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import update_server
-    update_server(server_id, server)
-    return {"message": "Server updated successfully"}
-
-@app.delete("/api/servers/{server_id}")
-async def delete_server_endpoint(server_id: int, request: Request):
-    """Удаляет сервер"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import delete_server
-    try:
-        delete_server(server_id)
-        return {"message": "Server deleted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/api/servers/{server_id}/clients")
-async def get_server_clients(server_id: int, request: Request):
-    """Получает клиентов конкретного сервера"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_clients_by_server
-    return get_clients_by_server(server_id)
-
-@app.post("/api/servers/test-connection")
-async def test_server_connection(server: dict, request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from ssh_manager import ssh_manager
-    
-    result = await ssh_manager.test_connection(
-        host=server["host"],
-        port=server.get("port", 22),
-        user=server.get("user", "root"),
-        ssh_key_path=server.get("ssh_key_path"),
-        passphrase=server.get("passphrase"),
-        password=server.get("password")
-    )
-    
-    return result
-
-@app.post("/api/servers/{server_id}/deploy")
-async def deploy_server(server_id: int, request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_server
-    from ssh_manager import ssh_manager
-    
-    server = get_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
-    
-    print(f"🚀 Starting deploy for server {server_id}")  # ← ОТЛАДКА
-    
-    deploy_id = str(uuid.uuid4())
-    print(f"📋 Deploy ID: {deploy_id}")  # ← ОТЛАДКА
-    
-    async def run_deploy():
-        print(f"🔄 run_deploy started for {deploy_id}")  # ← ОТЛАДКА
-        try:
-            async for log_line in ssh_manager.deploy_server(deploy_id, server):
-                print(f"📤 Sending log: {log_line[:50]}...")  # ← ОТЛАДКА
-                await manager.send_log(deploy_id, log_line)
-            await manager.send_log(deploy_id, "🎉 DEPLOY_COMPLETE")
-            print(f"✅ Deploy completed for {deploy_id}")  # ← ОТЛАДКА
-        except Exception as e:
-            print(f"❌ Deploy error: {e}")  # ← ОТЛАДКА
-            await manager.send_log(deploy_id, f"❌ Deploy failed: {str(e)}")
-        finally:
-            manager.disconnect(deploy_id)
-    
-    task = asyncio.create_task(run_deploy())
-    manager.deploy_tasks[deploy_id] = task
-    print(f"✅ Task created for {deploy_id}")  # ← ОТЛАДКА
-    
-    return {"deploy_id": deploy_id, "message": "Deployment started"}
 
 # HTML страницы
 @app.get("/")
