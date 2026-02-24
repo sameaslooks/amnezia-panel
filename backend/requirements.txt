@@ -1,4 +1,5 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-pyjwt==2.8.0
+fastapi==0.133.0
+uvicorn[standard]==0.41.0
+python-multipart==0.0.22
+pyjwt==2.11.0
+asyncssh==2.22.0
