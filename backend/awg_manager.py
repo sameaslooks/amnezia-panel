@@ -1,7 +1,8 @@
 import re
 import subprocess
 import json
-import asyncssh
+import asyncssh # type: ignore
+import os
 from typing import Optional, Dict, List, Union
 
 class AWGManager:
@@ -98,7 +99,7 @@ class AWGManager:
     
     async def get_traffic(self) -> List[Dict]:
         """Получает статистику трафика из awg show"""
-        self.collect_traffic_stats()
+        await self.collect_traffic_stats()
         
         output = await self._exec_in_container("awg show")
         if not output:
@@ -794,9 +795,21 @@ AllowedIPs = {next_ip}
             }
             
             if self.private_key:
-                from io import StringIO
-                key_data = StringIO(self.private_key)
-                connect_kwargs['client_keys'] = [key_data]
+                import tempfile
+                import os
+                
+                # Создаём временный файл с правильными правами
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                    f.write(self.private_key)
+                    temp_key_path = f.name
+                
+                # Устанавливаем правильные права доступа (600)
+                os.chmod(temp_key_path, 0o600)
+                
+                # Используем путь к файлу
+                connect_kwargs['client_keys'] = [temp_key_path]
+                self.temp_key_path = temp_key_path  # сохраняем для удаления
+                
             elif self.password:
                 connect_kwargs['password'] = self.password
                 
@@ -813,11 +826,19 @@ AllowedIPs = {next_ip}
             raise Exception(f"SSH connection failed: {e}")
 
     async def _close_ssh(self):
-        """Закрывает SSH соединение"""
+        """Закрывает SSH соединение и удаляет временный ключ"""
         if hasattr(self, 'ssh_connection') and self.ssh_connection:
             self.ssh_connection.close()
             await self.ssh_connection.wait_closed()
             self.ssh_connection = None
+        
+        # Удаляем временный файл с ключом
+        if hasattr(self, 'temp_key_path') and self.temp_key_path:
+            try:
+                os.unlink(self.temp_key_path)
+            except:
+                pass
+            self.temp_key_path = None
 
     async def setup_server_stream(self, sudo_password: Optional[str] = None):
         """
