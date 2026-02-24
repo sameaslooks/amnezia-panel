@@ -143,11 +143,10 @@
                                         </td>
                                         <td class="px-4 py-2" x-text="server.status?.clients_count || 0"></td>
                                         <td class="px-4 py-2">
-                                            <button @click="testServer(server.id)" 
-                                                    class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1"
-                                                    :disabled="server.testing">
-                                                <span x-show="!server.testing">Test</span>
-                                                <span x-show="server.testing">...</span>
+                                            <button type="button"
+                                                    @click.prevent="testServer(server.id)"
+                                                    class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1">
+                                                Test
                                             </button>
                                             <button @click="setupServer(server.id)" 
                                                     class="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 mr-1"
@@ -518,7 +517,7 @@
             currentUser: '',
             amneziaLink: '',
             currentSetupServerId: null,
-            activeTab: 'clients',
+            activeTab: 'servers',
 
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
