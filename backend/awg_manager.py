@@ -903,7 +903,8 @@ AllowedIPs = {next_ip}
                 "sudo apt install -y ca-certificates curl && "
                 "sudo install -m 0755 -d /etc/apt/keyrings && "
                 "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && "
-                "sudo chmod a+r /etc/apt/keyrings/docker.asc; "
+                "sudo chmod a+r /etc/apt/keyrings/docker.asc && "
+                "sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 7EA0A9C3F273FCD8; "
                 "fi"),
                 
                 ("🔧 Adding Docker repository", 
@@ -931,6 +932,8 @@ AllowedIPs = {next_ip}
                 ("📝 Creating Dockerfile", 
                 "sudo tee /opt/amnezia/Dockerfile > /dev/null << 'EOF'\n"
                 "FROM amneziavpn/amneziawg-go:latest\n\n"
+                "# Исправляем репозитории Alpine\n"
+                "RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories || true\n"
                 "RUN apk update && apk add --no-cache bash curl dumb-init\n"
                 "RUN mkdir -p /opt/amnezia\n"
                 "RUN echo -e '#!/bin/bash\\ntail -f /dev/null' > /opt/amnezia/start.sh\n"
