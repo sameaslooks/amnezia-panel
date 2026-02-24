@@ -814,13 +814,6 @@ AllowedIPs = {next_ip}
                 connect_kwargs['password'] = self.password
                 
             self.ssh_connection = await asyncssh.connect(**connect_kwargs)
-            
-            # Если есть пароль для sudo - кешируем сессию
-            if hasattr(self, 'sudo_password') and self.sudo_password:
-                cmd = f"echo '{self.sudo_password}' | sudo -S -v"
-                result = await self.ssh_connection.run(cmd)
-                if result.returncode != 0:
-                    raise Exception("Failed to cache sudo credentials")
                     
         except Exception as e:
             raise Exception(f"SSH connection failed: {e}")
@@ -863,6 +856,36 @@ AllowedIPs = {next_ip}
             # Подключаемся и кешируем sudo
             await self._connect_ssh()
             yield {"type": "info", "message": "✅ Connected to server"}
+
+            if sudo_password:
+                self.sudo_password = sudo_password
+
+                sudoers_cmd = (
+                    "echo '{pwd}' | sudo -S -p '' bash -c "
+                    "'echo \"{user} ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/awg-installer'"
+                ).format(
+                    pwd=sudo_password.replace("'", "'\"'\"'"),
+                    user=self.username
+                )
+
+                check_cmd = (
+                    "echo '{pwd}' | sudo -S -p '' visudo -cf /etc/sudoers.d/awg-installer"
+                ).format(
+                    pwd=sudo_password.replace("'", "'\"'\"'")
+                )
+
+                r1 = await self.ssh_connection.run(sudoers_cmd)
+                if r1.returncode != 0:
+                    raise Exception("Failed to create temporary sudoers rule")
+
+                r2 = await self.ssh_connection.run(check_cmd)
+                if r2.returncode != 0:
+                    # пробуем убрать файл, если он битый
+                    await self.ssh_connection.run(
+                        "echo '{pwd}' | sudo -S -p '' rm -f /etc/sudoers.d/awg-installer"
+                        .format(pwd=sudo_password.replace("'", "'\"'\"'"))
+                    )
+                    raise Exception("Invalid sudoers rule created")
             
             # Список команд установки
             commands = [
@@ -1014,6 +1037,14 @@ AllowedIPs = {next_ip}
             
         except Exception as e:
             yield {"type": "error", "message": str(e)}
+        finally:
+            if hasattr(self, "sudo_password") and self.sudo_password:
+                try:
+                    await self.ssh_connection.run(
+                        "sudo rm -f /etc/sudoers.d/awg-installer"
+                    )
+                except:
+                    pass
 
     async def get_server_status(self) -> Dict:
         """
