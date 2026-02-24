@@ -13,24 +13,29 @@
         <!-- Header -->
         <nav class="bg-white shadow-lg">
             <div class="max-w-7xl mx-auto px-4">
-                <div class="flex justify-between items-center">
-                    <h1 class="text-xl font-bold py-4">Amnezia VPN Admin</h1>
+                <div class="flex justify-between items-center h-16">
+                    <div class="flex items-center space-x-4">
+                        <h1 class="text-xl font-bold">Amnezia VPN Admin</h1>
+                            <div class="flex space-x-2">
+                                <button @click="activeTab = 'servers'"
+                                        :class="activeTab === 'servers' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                        class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                    Servers
+                                </button>
+                                <button @click="activeTab = 'clients'"
+                                        :class="activeTab === 'clients' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                        class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                    VPN Clients
+                                </button>
+                                <button @click="activeTab = 'users'"
+                                        :class="activeTab === 'users' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                        class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                    Users
+                                </button>
+                            </div>
+                    </div>
                     <button @click="logout" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
                         Logout
-                    </button>
-                </div>
-                
-                <!-- Tabs -->
-                <div class="flex border-b">
-                    <button @click="activeTab = 'clients'"
-                            :class="activeTab === 'clients' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
-                            class="py-3 px-4 font-medium transition">
-                        VPN Clients
-                    </button>
-                    <button @click="activeTab = 'users'"
-                            :class="activeTab === 'users' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
-                            class="py-3 px-4 font-medium transition">
-                        Users
                     </button>
                 </div>
             </div>
@@ -46,6 +51,159 @@
             <!-- Success Message -->
             <div x-show="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
                 <span x-text="success"></span>
+            </div>
+            
+            <!-- SERVERS TAB -->
+            <div x-show="activeTab === 'servers'">
+                <!-- Add Server Form -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h2 class="text-lg font-bold mb-4">Add New Server</h2>
+                    <form @submit.prevent="addServer">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <input type="text" x-model="newServer.name"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Server name (e.g. 'Frankfurt')" required>
+                            
+                            <input type="text" x-model="newServer.host"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Host (IP or domain)">
+                            
+                            <input type="text" x-model="newServer.username"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Username (for SSH)">
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <select x-model="newServer.auth_type" 
+                                    class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                <option value="local">Local (this server)</option>
+                                <option value="password">Password auth</option>
+                                <option value="key">Key auth</option>
+                                <option value="key+sudo">Key + sudo password</option>
+                            </select>
+                            
+                            <input type="password" x-model="newServer.password"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Password (if needed)">
+                            
+                            <input type="text" x-model="newServer.port"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="SSH port (default 22)">
+                        </div>
+                        
+                        <div class="mb-4" x-show="newServer.auth_type.includes('key')">
+                            <textarea x-model="newServer.private_key"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500 font-mono text-sm"
+                                    rows="4"
+                                    placeholder="Paste private key here (including BEGIN and END lines)"></textarea>
+                        </div>
+                        
+                        <button type="submit" 
+                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                                :disabled="addingServer">
+                            <span x-show="!addingServer">Add Server</span>
+                            <span x-show="addingServer">Adding...</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Servers Table -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Name</th>
+                                    <th class="px-4 py-2 text-left">Host</th>
+                                    <th class="px-4 py-2 text-left">Type</th>
+                                    <th class="px-4 py-2 text-left">Status</th>
+                                    <th class="px-4 py-2 text-left">Clients</th>
+                                    <th class="px-4 py-2 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="server in servers" :key="server.id">
+                                    <tr class="border-t">
+                                        <td class="px-4 py-2 font-medium" x-text="server.name"></td>
+                                        <td class="px-4 py-2" x-text="server.host || 'local'"></td>
+                                        <td class="px-4 py-2">
+                                            <span class="px-2 py-1 rounded text-xs"
+                                                :class="{
+                                                    'bg-green-100 text-green-800': server.auth_type === 'local',
+                                                    'bg-blue-100 text-blue-800': server.auth_type === 'password',
+                                                    'bg-purple-100 text-purple-800': server.auth_type === 'key',
+                                                    'bg-yellow-100 text-yellow-800': server.auth_type === 'key+sudo'
+                                                }"
+                                                x-text="server.auth_type"></span>
+                                        </td>
+                                        <td class="px-4 py-2">
+                                            <span x-show="server.status?.online" class="text-green-600">● Online</span>
+                                            <span x-show="!server.status?.online" class="text-gray-400">● Offline</span>
+                                            <span x-show="server.status?.container_running" class="text-green-600 text-xs ml-1">(container up)</span>
+                                        </td>
+                                        <td class="px-4 py-2" x-text="server.status?.clients_count || 0"></td>
+                                        <td class="px-4 py-2">
+                                            <button @click="testServer(server.id)" 
+                                                    class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1"
+                                                    :disabled="server.testing">
+                                                <span x-show="!server.testing">Test</span>
+                                                <span x-show="server.testing">...</span>
+                                            </button>
+                                            <button @click="setupServer(server.id)" 
+                                                    class="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 mr-1"
+                                                    x-show="server.auth_type !== 'local'">
+                                                Setup
+                                            </button>
+                                            <button @click="editServer(server)" 
+                                                    class="bg-yellow-500 text-white px-2 py-1 rounded text-xs hover:bg-yellow-600 mr-1">
+                                                Edit
+                                            </button>
+                                            <button @click="deleteServer(server.id, server.name)" 
+                                                    class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600"
+                                                    :disabled="server.auth_type === 'local'">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Setup Log Modal (для real-time логов) -->
+                <div x-show="showSetupModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold">Server Setup Log</h3>
+                            <button @click="closeSetupModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        </div>
+                        
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-sm h-96 overflow-y-auto">
+                            <template x-for="(log, index) in setupLogs" :key="index">
+                                <div :class="{
+                                    'text-green-400': log.type === 'success',
+                                    'text-red-400': log.type === 'error',
+                                    'text-yellow-400': log.type === 'warning',
+                                    'text-blue-400': log.type === 'info',
+                                    'text-white': log.type === 'step' && log.success,
+                                    'text-red-300': log.type === 'step' && !log.success
+                                }">
+                                    <span x-show="log.type === 'step'" x-text="`[${log.success ? '✓' : '✗'}] ${log.name}`"></span>
+                                    <span x-show="log.type !== 'step'" x-text="log.message"></span>
+                                    <span x-show="log.output" class="text-gray-400 text-xs block ml-4" x-text="log.output"></span>
+                                </div>
+                            </template>
+                        </div>
+                        
+                        <div class="flex justify-end mt-4">
+                            <button @click="closeSetupModal" 
+                                    class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- CLIENTS TAB -->
@@ -345,9 +503,11 @@
     <script>
     function adminPanel() {
         return {
+            servers: [],
             clients: [],
             traffic: [],
             users: [],
+            setupLogs: [],
             error: '',
             success: '',
             newClientName: '',
@@ -355,14 +515,27 @@
             showConfigModal: false,
             selectedConfig: '',
             selectedClientName: '',
+            currentUser: '',
+            amneziaLink: '',
+            currentSetupServerId: null,
             activeTab: 'clients',
+
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
+            newServer: {
+                name: '',
+                host: '',
+                port: 22,
+                username: '',
+                auth_type: 'password',
+                password: '',
+                private_key: ''
+            },
             showEditModal: false,
             addingUser: false,
             savingUser: false,
-            currentUser: '',
-            amneziaLink: '',
+            addingServer: false,
+            showSetupModal: false,
             qrSize: 400,  // QR code size in pixels (change here to adjust)
             
             init() {
@@ -379,12 +552,17 @@
                 this.fetchAllData().then(() => {
                     this.fetchTraffic();
                 });
+                this.fetchServers();  // <-- добавить
                 
                 setInterval(() => {
                     this.fetchTraffic();
                 }, 5000);
+                
+                // Периодически обновляем статусы серверов
+                setInterval(() => {
+                    this.servers.forEach(server => this.fetchServerStatus(server.id));
+                }, 30000);
             },
-
             async fetchAllData() {
                 try {
                     const token = localStorage.getItem('token');
@@ -814,6 +992,199 @@
                 }
                 document.body.removeChild(textarea);
             },
+
+            // ========== MULTI-SERVER MANAGEMENT ==========
+            async fetchServers() {
+                try {
+                    const response = await fetch('/api/servers', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const servers = await response.json();
+                        this.servers = servers;
+                        // Запрашиваем статус для каждого сервера
+                        servers.forEach(server => this.fetchServerStatus(server.id));
+                    }
+                } catch (err) {
+                    this.error = 'Failed to fetch servers';
+                }
+            },
+
+            async fetchServerStatus(serverId) {
+                try {
+                    const response = await fetch(`/api/servers/${serverId}/status`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const status = await response.json();
+                        const server = this.servers.find(s => s.id === serverId);
+                        if (server) {
+                            server.status = status;
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch server status');
+                }
+            },
+
+            async addServer() {
+                this.addingServer = true;
+                this.error = '';
+                this.success = '';
+                
+                try {
+                    const response = await fetch('/api/servers', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(this.newServer)
+                    });
+                    
+                    if (response.ok) {
+                        this.newServer = {
+                            name: '',
+                            host: '',
+                            port: 22,
+                            username: '',
+                            auth_type: 'password',
+                            password: '',
+                            private_key: ''
+                        };
+                        this.success = 'Server added successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        this.fetchServers();
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to add server';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to add server';
+                } finally {
+                    this.addingServer = false;
+                }
+            },
+
+            async testServer(serverId) {
+                const server = this.servers.find(s => s.id === serverId);
+                if (!server) return;
+                
+                server.testing = true;
+                
+                try {
+                    const response = await fetch(`/api/servers/${serverId}/test`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        this.success = 'Connection successful';
+                        this.fetchServerStatus(serverId);
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Connection failed';
+                    }
+                } catch (err) {
+                    this.error = 'Connection test failed';
+                } finally {
+                    server.testing = false;
+                    setTimeout(() => this.success = '', 3000);
+                    setTimeout(() => this.error = '', 3000);
+                }
+            },
+
+            async setupServer(serverId) {
+                this.currentSetupServerId = serverId;
+                this.setupLogs = [];
+                this.showSetupModal = true;
+                
+                // Запрашиваем sudo password если нужно
+                let sudoPassword = null;
+                const server = this.servers.find(s => s.id === serverId);
+                if (server?.auth_type === 'key+sudo') {
+                    sudoPassword = prompt('Enter sudo password for this server:');
+                    if (!sudoPassword) return;
+                }
+                
+                const ws = new WebSocket(`ws://${window.location.host}/api/servers/${serverId}/setup-ws`);
+                
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({
+                        token: localStorage.getItem('token'),
+                        sudo_password: sudoPassword
+                    }));
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.setupLogs.push(data);
+                    // Автоскролл вниз
+                    this.$nextTick(() => {
+                        const logContainer = document.querySelector('.bg-gray-900');
+                        if (logContainer) {
+                            logContainer.scrollTop = logContainer.scrollHeight;
+                        }
+                    });
+                };
+                
+                ws.onerror = (error) => {
+                    this.setupLogs.push({ type: 'error', message: 'WebSocket error' });
+                };
+                
+                ws.onclose = () => {
+                    this.fetchServerStatus(serverId);
+                };
+            },
+
+            closeSetupModal() {
+                this.showSetupModal = false;
+                this.setupLogs = [];
+                this.currentSetupServerId = null;
+            },
+
+            editServer(server) {
+                // TODO: реализовать редактирование
+                alert('Edit server - coming soon');
+            },
+
+            async deleteServer(serverId, serverName) {
+                if (!confirm(`Are you sure you want to delete server "${serverName}"?`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/api/servers/${serverId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        this.servers = this.servers.filter(s => s.id !== serverId);
+                        this.success = 'Server deleted successfully';
+                        setTimeout(() => this.success = '', 3000);
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to delete server';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to delete server';
+                }
+            },
+
+
+
+
 			
             logout() {
                 localStorage.removeItem('token');
