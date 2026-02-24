@@ -1,28 +1,73 @@
 import re
 import subprocess
 import json
-from typing import List, Dict
+import asyncssh
+from typing import Optional, Dict, List, Union
 
 class AWGManager:
-    def __init__(self, container_name: str = "amnezia-awg2"):
-        self.container_name = container_name
+    def __init__(self, server_id: Optional[int] = None, connection_params: Optional[Dict] = None):
+        """
+        Инициализация менеджера для работы с сервером AmneziaWG.
+        
+        Аргументы:
+            server_id: ID сервера из БД (для последующего использования)
+            connection_params: Параметры подключения (если None - берём из БД по server_id)
+        """
+        self.server_id = server_id
+        self.container_name = "amnezia-awg2"  # всегда одинаковое
+        self.connection_type = 'local'  # по умолчанию
+        self.ssh_client = None
+        self.host = None
+        self.port = 22
+        self.username = None
+        self.password = None
+        self.private_key = None
+        
+        if connection_params:
+            self._setup_from_params(connection_params)
+        elif server_id:
+            self._setup_from_db(server_id)
     
-    def _exec_in_container(self, command: str) -> str:
-        """Выполняет команду в контейнере Amnezia через docker exec"""
-        try:
-            result = subprocess.run(
-                ["docker", "exec", self.container_name, "bash", "-c", command],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            return ""
+    async def _exec_in_container(self, command: str) -> str:
+        """Асинхронно выполняет команду в контейнере"""
+        if self.connection_type == 'local':
+            # Локальный режим (оставляем subprocess, но можно тоже сделать асинхронным через asyncio.create_subprocess_exec)
+            try:
+                result = subprocess.run(
+                    ["docker", "exec", self.container_name, "bash", "-c", command],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                return result.stdout
+            except subprocess.CalledProcessError:
+                return ""
+        else:
+            try:
+                await self._connect_ssh()
+                
+                # Экранируем команду
+                escaped_command = command.replace('"', '\\"').replace("'", "\\'")
+                docker_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
+                
+                # Добавляем sudo если нужно
+                if hasattr(self, 'sudo_password'):
+                    docker_cmd = f"sudo {docker_cmd}"
+                
+                result = await self.ssh_connection.run(docker_cmd)
+                
+                if result.returncode != 0:
+                    return ""
+                    
+                return result.stdout
+                
+            except Exception as e:
+                print(f"SSH execution error: {e}")
+                return ""
     
-    def get_clients(self) -> List[Dict]:
+    async def get_clients(self) -> List[Dict]:
         """Получает клиентов из clientsTable с именами устройств"""
-        table_json = self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
+        table_json = await self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         
         try:
             clients_data = json.loads(table_json)
@@ -31,7 +76,7 @@ class AWGManager:
         except:
             client_names = {}
         
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         clients = []
         peers = config.split('[Peer]')[1:]
         
@@ -51,11 +96,11 @@ class AWGManager:
         
         return clients
     
-    def get_traffic(self) -> List[Dict]:
+    async def get_traffic(self) -> List[Dict]:
         """Получает статистику трафика из awg show"""
         self.collect_traffic_stats()
         
-        output = self._exec_in_container("awg show")
+        output = await self._exec_in_container("awg show")
         if not output:
             return []
         
@@ -110,17 +155,17 @@ class AWGManager:
         except:
             return "YOUR_SERVER_IP"
     
-    def add_client(self, name: str) -> Dict:
+    async def add_client(self, name: str) -> Dict:
         """Добавляет нового клиента"""
         # Генерируем ключи
-        private_key = self._exec_in_container("awg genkey").strip()
-        public_key = self._exec_in_container(f"echo '{private_key}' | awg pubkey").strip()
+        private_key = (await self._exec_in_container("awg genkey")).strip()
+        public_key = (await self._exec_in_container(f"echo '{private_key}' | awg pubkey")).strip()
         
         # Генерируем Pre-shared ключ для этого пира
-        psk = self._exec_in_container("wg genpsk").strip()
+        psk = (await self._exec_in_container("wg genpsk")).strip()
         
         # Получаем текущий конфиг
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         
         # Определяем следующий IP
         next_ip = self._get_next_ip(config)
@@ -135,13 +180,13 @@ AllowedIPs = {next_ip}
         new_config = config.rstrip() + "\n" + peer_section
         
         # Записываем новый конфиг в файл
-        self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
+        await self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
         
         # Синхронизируем интерфейс с файлом
-        self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
+        await self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         
         # Добавляем запись в clientsTable
-        table_json = self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
+        table_json = await self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             clients_table = json.loads(table_json)
         except:
@@ -160,10 +205,10 @@ AllowedIPs = {next_ip}
         
         # Записываем обновленную таблицу
         import json as json_lib
-        self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
+        await self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
         
         # Получаем параметры сервера для конфига клиента
-        client_config = self.get_client_config(public_key)
+        client_config = await self.get_client_config(public_key)
         
         from database import create_client
         create_client(public_key, name, next_ip, private_key)
@@ -172,7 +217,7 @@ AllowedIPs = {next_ip}
         write_cmd = (
             f"mkdir -p {safe_path} && cat > {safe_path}/{public_key}.conf << 'EOF'\n{client_config}\nEOF"
         )
-        self._exec_in_container(write_cmd)
+        await self._exec_in_container(write_cmd)
         return {
             "name": name,
             "ip": next_ip,
@@ -180,10 +225,10 @@ AllowedIPs = {next_ip}
             "config": client_config
         }
     
-    def delete_client(self, public_key: str):
+    async def delete_client(self, public_key: str):
         """Удаляет клиента"""
         # Читаем текущий конфиг
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         
         # Разбиваем на строки
         lines = config.split('\n')
@@ -225,25 +270,25 @@ AllowedIPs = {next_ip}
         new_config = '\n'.join(cleaned_lines)
         
         # Записываем новый конфиг
-        self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
+        await self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
         
         # Синхронизируем интерфейс с файлом
-        self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
+        await self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         
         # Удаляем из clientsTable
-        table_json = self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
+        table_json = await self._exec_in_container("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             clients_table = json.loads(table_json)
             clients_table = [item for item in clients_table if item.get("clientId") != public_key]
             
             import json as json_lib
-            self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
+            await self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
         except:
             pass
 
-    def get_client_config(self, public_key: str) -> str:
+    async def get_client_config(self, public_key: str) -> str:
         """Генерирует конфиг для клиента по его публичному ключу"""
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         
         # Ищем приватный ключ сервера
         priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
@@ -251,7 +296,7 @@ AllowedIPs = {next_ip}
             return ""
         
         server_private = priv_match.group(1)
-        server_public = self._exec_in_container(f"echo '{server_private}' | awg pubkey").strip()
+        server_public = (await self._exec_in_container(f"echo '{server_private}' | awg pubkey")).strip()
         
         # Ищем IP клиента
         peers = config.split('[Peer]')[1:]
@@ -275,7 +320,7 @@ AllowedIPs = {next_ip}
         # Если в БД нет приватного ключа — пробуем загрузить из сохранённого конфига
         if not private_key:
             try:
-                cfg = self._exec_in_container(f"cat /opt/amnezia/awg/client_configs/{public_key}.conf 2>/dev/null || true")
+                cfg = await self._exec_in_container(f"cat /opt/amnezia/awg/client_configs/{public_key}.conf 2>/dev/null || true")
                 if cfg:
                     m = re.search(r'PrivateKey\s*=\s*(\S+)', cfg)
                     if m:
@@ -292,12 +337,12 @@ AllowedIPs = {next_ip}
         if not private_key:
             try:
                 # Получаем список файлов, где встречается эта PublicKey
-                files_list = self._exec_in_container(f"grep -R -l \"PublicKey = {public_key}\" /opt/amnezia/awg 2>/dev/null || true")
+                files_list = await self._exec_in_container(f"grep -R -l \"PublicKey = {public_key}\" /opt/amnezia/awg 2>/dev/null || true")
                 for fp in files_list.splitlines():
                     fp = fp.strip()
                     if not fp:
                         continue
-                    file_contents = self._exec_in_container(f"cat {fp} 2>/dev/null || true")
+                    file_contents = await self._exec_in_container(f"cat {fp} 2>/dev/null || true")
                     m2 = re.search(r'PrivateKey\s*=\s*(\S+)', file_contents)
                     if m2:
                         private_key = m2.group(1)
@@ -391,9 +436,9 @@ AllowedIPs = {next_ip}
 
         return iface + "\n" + "\n".join(peer_lines)
 
-    def get_traffic_bytes(self) -> Dict[str, Dict]:
+    async def get_traffic_bytes(self) -> Dict[str, Dict]:
         """Получает трафик в байтах для каждого клиента"""
-        output = self._exec_in_container("awg show")
+        output = await self._exec_in_container("awg show")
         if not output:
             return {}
         
@@ -438,9 +483,9 @@ AllowedIPs = {next_ip}
             return 0
         return 0
 
-    def collect_traffic_stats(self):
+    async def collect_traffic_stats(self):
         """Collect traffic from `awg show`, parse and update DB."""
-        output = self._exec_in_container("awg show")
+        output = await self._exec_in_container("awg show")
         if not output:
             return
 
@@ -467,10 +512,10 @@ AllowedIPs = {next_ip}
                 except Exception:
                     continue
                     
-    def block_client(self, public_key: str):
+    async def block_client(self, public_key: str):
         """Блокирует клиента через iptables (по IP)"""
         # Находим IP клиента
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         peers = config.split('[Peer]')[1:]
         
         client_ip = None
@@ -487,15 +532,15 @@ AllowedIPs = {next_ip}
         ip = client_ip.split('/')[0]
         
         # Блокируем в FORWARD (оба направления)
-        self._exec_in_container(f"iptables -I FORWARD 1 -s {ip} -j DROP")
-        self._exec_in_container(f"iptables -I FORWARD 1 -d {ip} -j DROP")
+        await self._exec_in_container(f"iptables -I FORWARD 1 -s {ip} -j DROP")
+        await self._exec_in_container(f"iptables -I FORWARD 1 -d {ip} -j DROP")
         
         print(f"Blocked {ip} ({public_key[:20]}...)")
         return True
 
-    def unblock_client(self, public_key: str):
+    async def unblock_client(self, public_key: str):
         """Разблокирует клиента"""
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         peers = config.split('[Peer]')[1:]
         
         client_ip = None
@@ -512,13 +557,13 @@ AllowedIPs = {next_ip}
         ip = client_ip.split('/')[0]
         
         # Удаляем правила
-        self._exec_in_container(f"iptables -D FORWARD -s {ip} -j DROP 2>/dev/null || true")
-        self._exec_in_container(f"iptables -D FORWARD -d {ip} -j DROP 2>/dev/null || true")
+        await self._exec_in_container(f"iptables -D FORWARD -s {ip} -j DROP 2>/dev/null || true")
+        await self._exec_in_container(f"iptables -D FORWARD -d {ip} -j DROP 2>/dev/null || true")
         
         print(f"Unblocked {ip} ({public_key[:20]}...)")
         return True
 
-    def sync_iptables_with_db(self):
+    async def sync_iptables_with_db(self):
         """Синхронизирует iptables с базой данных"""
 
         from database import get_all_clients
@@ -526,11 +571,11 @@ AllowedIPs = {next_ip}
         
         for client in clients:
             if not client['is_active']:
-                self.block_client(client['public_key'])
+                await self.block_client(client['public_key'])
             else:
-                self.unblock_client(client['public_key'])
+                await self.unblock_client(client['public_key'])
     
-    def generate_amnezia_vpn_link(
+    async def generate_amnezia_vpn_link(
         self,
         client_ip: str,
         client_private_key: str,
@@ -545,7 +590,7 @@ AllowedIPs = {next_ip}
 
         server_ip = self._get_server_ip()
 
-        config = self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
 
         # Получаем порт из конфига
         port_match = re.search(r'ListenPort\s*=\s*(\d+)', config)
@@ -555,7 +600,7 @@ AllowedIPs = {next_ip}
         server_public = ""
         if priv_match:
             private_key = priv_match.group(1)
-            server_public = self._exec_in_container(f"echo '{private_key}' | awg pubkey").strip()
+            server_public = (await self._exec_in_container(f"echo '{private_key}' | awg pubkey")).strip()
 
         def get(pattern, default=""):
             m = re.search(pattern, config)
@@ -700,3 +745,305 @@ AllowedIPs = {next_ip}
         b64 = base64.urlsafe_b64encode(qt).decode().rstrip("=")
 
         return f"vpn://{b64}"
+    
+    # ========== MULTI-SERVER MANAGEMENT ==========
+    def _setup_from_params(self, params: Dict):
+        """Настраивает подключение из переданных параметров"""
+        self.connection_type = params.get('type', 'local')
+        
+        if self.connection_type == 'remote':
+            self.host = params.get('host')
+            self.port = params.get('port', 22)
+            self.username = params.get('username')
+            self.password = params.get('password')
+            self.private_key = params.get('private_key')
+            
+            if not self.host or not self.username:
+                raise ValueError("host and username required for remote connection")
+        # для local ничего не нужно
+
+    def _setup_from_db(self, server_id: int):
+        """Загружает параметры сервера из БД"""
+        from database import get_server
+        
+        server = get_server(server_id)
+        if not server:
+            raise ValueError(f"Server with ID {server_id} not found")
+        
+        if server['auth_type'] == 'local':
+            self.connection_type = 'local'
+        else:
+            self.connection_type = 'remote'
+            self.host = server['host']
+            self.port = server['port']
+            self.username = server['username']
+            self.password = server['password']
+            self.private_key = server['private_key']
+
+    async def _connect_ssh(self):
+        """Асинхронно устанавливает SSH соединение"""
+        if hasattr(self, 'ssh_connection') and self.ssh_connection:
+            return
+            
+        try:
+            connect_kwargs = {
+                'host': self.host,
+                'port': self.port,
+                'username': self.username,
+                'known_hosts': None  # Отключаем проверку known_hosts для простоты
+            }
+            
+            if self.private_key:
+                from io import StringIO
+                key_data = StringIO(self.private_key)
+                connect_kwargs['client_keys'] = [key_data]
+            elif self.password:
+                connect_kwargs['password'] = self.password
+                
+            self.ssh_connection = await asyncssh.connect(**connect_kwargs)
+            
+            # Если есть пароль для sudo - кешируем сессию
+            if hasattr(self, 'sudo_password') and self.sudo_password:
+                cmd = f"echo '{self.sudo_password}' | sudo -S -v"
+                result = await self.ssh_connection.run(cmd)
+                if result.returncode != 0:
+                    raise Exception("Failed to cache sudo credentials")
+                    
+        except Exception as e:
+            raise Exception(f"SSH connection failed: {e}")
+
+    async def _close_ssh(self):
+        """Закрывает SSH соединение"""
+        if hasattr(self, 'ssh_connection') and self.ssh_connection:
+            self.ssh_connection.close()
+            await self.ssh_connection.wait_closed()
+            self.ssh_connection = None
+
+    async def setup_server_stream(self, sudo_password: Optional[str] = None):
+        """
+        Установка AmneziaWG с потоковой передачей логов в реальном времени.
+        Для локального режима не используется (вызывать только для remote).
+        
+        Args:
+            sudo_password: Пароль для sudo (если требуется)
+        
+        Yields:
+            Dict с шагом установки
+        """
+        if self.connection_type == 'local':
+            yield {"type": "error", "message": "Setup is only for remote servers"}
+            return
+        
+        # Сохраняем sudo_password для кеширования
+        if sudo_password:
+            self.sudo_password = sudo_password
+        
+        try:
+            # Подключаемся и кешируем sudo
+            await self._connect_ssh()
+            yield {"type": "info", "message": "✅ Connected to server"}
+            
+            # Список команд установки
+            commands = [
+                ("📦 Checking if Docker already installed", 
+                "if command -v docker >/dev/null 2>&1; then "
+                "echo 'DOCKER_ALREADY_INSTALLED'; "
+                "else echo 'DOCKER_NEEDS_INSTALL'; fi"),
+                
+                ("🔧 Cleaning old Docker repository entries", 
+                "sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources"),
+                
+                ("🔧 Setting up Docker repository", 
+                "if [ ! -f /etc/apt/keyrings/docker.asc ]; then "
+                "sudo apt update && "
+                "sudo apt install -y ca-certificates curl && "
+                "sudo install -m 0755 -d /etc/apt/keyrings && "
+                "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && "
+                "sudo chmod a+r /etc/apt/keyrings/docker.asc; "
+                "fi"),
+                
+                ("🔧 Adding Docker repository", 
+                "CODENAME=$(lsb_release -cs) && "
+                "sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null << EOF\n"
+                "Types: deb\n"
+                "URIs: https://download.docker.com/linux/ubuntu\n"
+                "Suites: $CODENAME\n"
+                "Components: stable\n"
+                "Signed-By: /etc/apt/keyrings/docker.asc\n"
+                "EOF"),
+                
+                ("🔧 Installing Docker if needed", 
+                "if ! command -v docker >/dev/null 2>&1; then "
+                "sudo apt update && "
+                "sudo apt install -y docker-ce docker-ce-cli containerd.io; "
+                "else echo 'Docker already installed, skipping...'; fi"),
+                
+                ("👤 Adding user to docker group", 
+                f"sudo usermod -aG docker {self.username} || true"),
+                
+                ("📁 Creating directories", 
+                "sudo mkdir -p /opt/amnezia/awg /opt/amnezia/backups"),
+                
+                ("📝 Creating Dockerfile", 
+                "sudo tee /opt/amnezia/Dockerfile > /dev/null << 'EOF'\n"
+                "FROM amneziavpn/amneziawg-go:latest\n\n"
+                "RUN apk update && apk add --no-cache bash curl dumb-init\n"
+                "RUN mkdir -p /opt/amnezia\n"
+                "RUN echo -e '#!/bin/bash\\ntail -f /dev/null' > /opt/amnezia/start.sh\n"
+                "RUN chmod a+x /opt/amnezia/start.sh\n"
+                "ENTRYPOINT [\"dumb-init\", \"/opt/amnezia/start.sh\"]\n"
+                "EOF"),
+                
+                ("🔨 Building Docker image", 
+                "cd /opt/amnezia && sudo docker build -t amnezia-awg2 ."),
+                
+                ("🔄 Stopping old container", 
+                "sudo docker stop amnezia-awg2 2>/dev/null || true && "
+                "sudo docker rm amnezia-awg2 2>/dev/null || true"),
+                
+                ("🚀 Starting container", 
+                "sudo docker run -d --name amnezia-awg2 "
+                "--cap-add=NET_ADMIN --cap-add=NET_RAW "
+                "--device=/dev/net/tun "
+                "-v /opt/amnezia/awg:/opt/amnezia/awg "
+                "-v /opt/amnezia/backups:/opt/amnezia/backups "
+                "--restart unless-stopped "
+                "-p 32308:32308/udp "
+                "-e AWG_SUBNET_IP=10.8.1.0 "
+                "-e WIREGUARD_SUBNET_CIDR=24 "
+                "amnezia-awg2"),
+                
+                ("📋 Generating server keys", 
+                "sudo docker exec amnezia-awg2 sh -c '"
+                "rm -f /opt/amnezia/awg/server_private.key /opt/amnezia/awg/server_public.key && "
+                "PRIVATE_KEY=$(awg genkey) && "
+                "echo \"$PRIVATE_KEY\" > /opt/amnezia/awg/server_private.key && "
+                "echo \"$PRIVATE_KEY\" | awg pubkey > /opt/amnezia/awg/server_public.key'"),
+                
+                ("📝 Creating server config", 
+                "sudo docker exec amnezia-awg2 sh -c '"
+                "PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key) && "
+                "cat > /opt/amnezia/awg/awg0.conf << EOF\n"
+                "[Interface]\n"
+                "Address = 10.8.1.1/24\n"
+                "ListenPort = 32308\n"
+                "PrivateKey = $PRIVATE_KEY\n"
+                "Jc = 4\n"
+                "Jmin = 10\n"
+                "Jmax = 50\n"
+                "S1 = 95\n"
+                "S2 = 21\n"
+                "S3 = 6\n"
+                "S4 = 10\n"
+                "H1 = 1144016577-1678296790\n"
+                "H2 = 2067003202-2073469039\n"
+                "H3 = 2118455839-2136843295\n"
+                "H4 = 2142407594-2142521231\n"
+                "EOF'"),
+                
+                ("📝 Creating startup script", 
+                "sudo docker exec amnezia-awg2 sh -c '"
+                "cat > /opt/amnezia/start.sh << 'EOF'\n"
+                "#!/bin/bash\n"
+                "awg-quick up /opt/amnezia/awg/awg0.conf\n"
+                "iptables -A INPUT -i awg0 -j ACCEPT\n"
+                "iptables -A FORWARD -i awg0 -j ACCEPT\n"
+                "iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o eth0 -j MASQUERADE\n"
+                "tail -f /dev/null\n"
+                "EOF'"),
+                
+                ("🔧 Setting execute permission", 
+                "sudo docker exec amnezia-awg2 chmod +x /opt/amnezia/start.sh"),
+                
+                ("🔄 Restarting container", 
+                "sudo docker restart amnezia-awg2"),
+                
+                ("✅ Checking container", 
+                "sudo docker ps --filter name=amnezia-awg2 --format '{{.Status}}'")
+            ]
+            
+            for step_name, cmd in commands:
+                try:
+                    proc = await self.ssh_connection.run(cmd)
+                    success = proc.returncode == 0
+                    
+                    yield {
+                        "type": "step",
+                        "name": step_name,
+                        "success": success,
+                        "output": proc.stdout or proc.stderr
+                    }
+                    
+                    if not success:
+                        yield {"type": "warning", "message": f"Step {step_name} failed but continuing"}
+                        
+                except Exception as e:
+                    yield {
+                        "type": "error",
+                        "name": step_name,
+                        "error": str(e)
+                    }
+            
+            # Финальная проверка
+            check = await self.ssh_connection.run("sudo docker ps --filter name=amnezia-awg2 --format '{{.Status}}'")
+            if check.returncode == 0 and "Up" in check.stdout:
+                yield {"type": "success", "message": "✅ Server is ready!", "output": check.stdout}
+            else:
+                yield {"type": "error", "message": "❌ Server is not running", "output": check.stderr}
+            
+        except Exception as e:
+            yield {"type": "error", "message": str(e)}
+
+    async def get_server_status(self) -> Dict:
+        """
+        Получает статус сервера: запущен ли контейнер, версии, использование ресурсов.
+        Для локального режима тоже работает (через docker напрямую).
+        
+        Returns:
+            Dict со статусом сервера
+        """
+        status = {
+            "online": False,
+            "container_running": False,
+            "version": None,
+            "clients_count": 0,
+            "errors": []
+        }
+        
+        try:
+            # Проверяем доступность сервера (для remote - ssh, для local - всегда true)
+            if self.connection_type == 'remote':
+                try:
+                    await self._connect_ssh()
+                    status["online"] = True
+                except:
+                    status["errors"].append("SSH connection failed")
+                    return status
+            else:
+                status["online"] = True
+            
+            # Проверяем контейнер
+            container_check = await self._exec_in_container("echo 'container_ok' 2>/dev/null || echo 'container_down'")
+            if container_check and 'container_ok' in container_check:
+                status["container_running"] = True
+                
+                # Получаем версию amneziawg
+                version = await self._exec_in_container("awg version 2>/dev/null || echo 'unknown'")
+                status["version"] = version.strip()
+                
+                # Получаем количество клиентов
+                config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf 2>/dev/null || echo ''")
+                if config:
+                    peers = config.split('[Peer]')[1:]
+                    status["clients_count"] = len(peers)
+                
+                # Получаем статус интерфейса
+                interface = await self._exec_in_container("awg show 2>/dev/null | head -1 || echo 'interface down'")
+                status["interface"] = interface.strip()
+            else:
+                status["errors"].append("Container not running")
+                
+        except Exception as e:
+            status["errors"].append(str(e))
+        
+        return status
