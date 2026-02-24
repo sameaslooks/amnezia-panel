@@ -552,7 +552,7 @@
                 this.fetchAllData().then(() => {
                     this.fetchTraffic();
                 });
-                this.fetchServers();  // <-- добавить
+                this.fetchServers();
                 
                 setInterval(() => {
                     this.fetchTraffic();
@@ -1088,7 +1088,7 @@
                     
                     if (response.ok) {
                         this.success = 'Connection successful';
-                        this.fetchServerStatus(serverId);
+                        await this.fetchServerStatus(serverId);
                     } else {
                         const error = await response.json();
                         this.error = error.detail || 'Connection failed';
@@ -1115,7 +1115,8 @@
                     if (!sudoPassword) return;
                 }
                 
-                const ws = new WebSocket(`ws://${window.location.host}/api/servers/${serverId}/setup-ws`);
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const ws = new WebSocket(`${protocol}//${window.location.host}/api/servers/${serverId}/setup-ws`);
                 
                 ws.onopen = () => {
                     ws.send(JSON.stringify({
