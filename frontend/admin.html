@@ -1107,12 +1107,11 @@
                 this.setupLogs = [];
                 this.showSetupModal = true;
                 
-                // Запрашиваем sudo password если нужно
+                // Используем пароль из данных сервера
                 let sudoPassword = null;
                 const server = this.servers.find(s => s.id === serverId);
-                if (server?.auth_type === 'key+sudo') {
-                    sudoPassword = prompt('Enter sudo password for this server:');
-                    if (!sudoPassword) return;
+                if (server?.auth_type === 'key+sudo' || server?.auth_type === 'password') {
+                    sudoPassword = server.password;
                 }
                 
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
