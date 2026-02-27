@@ -570,16 +570,24 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
     try:
         # Получаем токен из первого сообщения
         data = await websocket.receive_json()
+        print(f"Received data: {data}")  # Логируем полученные данные
+        
         token = data.get("token")
         sudo_password = data.get("sudo_password")
         
         # Проверяем токен
+        if not token:
+            await websocket.send_json({"type": "error", "message": "No token provided"})
+            await websocket.close()
+            return
+            
         payload = decode_token(token)
         if not payload or payload.get("role") != "admin":
             await websocket.send_json({"type": "error", "message": "Unauthorized"})
             await websocket.close()
             return
         
+        # Получаем данные сервера из БД
         from database import get_server
         server = get_server(server_id)
         if not server:
@@ -587,15 +595,29 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
             await websocket.close()
             return
         
-        # Запускаем установку
-        awg = AWGManager(server_id=server_id)
+        print(f"Setting up server {server_id} with sudo password: {'provided' if sudo_password else 'not provided'}")
         
+        # Создаём менеджер с параметрами сервера
+        connection_params = {
+            'type': 'remote',
+            'auth_type': server['auth_type'],
+            'host': server['host'],
+            'port': server['port'],
+            'username': server['username'],
+            'password': server.get('password'),  # Может быть None
+            'private_key': server.get('private_key')  # Может быть None
+        }
+        
+        awg = AWGManager(server_id=server_id, connection_params=connection_params)
+        
+        # Запускаем установку с переданным паролем sudo
         async for update in awg.setup_server_stream(sudo_password):
             await websocket.send_json(update)
             
     except WebSocketDisconnect:
         print(f"Client disconnected from server {server_id} setup")
     except Exception as e:
+        print(f"WebSocket error: {e}")
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
         except:
