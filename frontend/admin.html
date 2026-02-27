@@ -211,12 +211,26 @@
                 <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                     <h2 class="text-lg font-bold mb-4">Add New Client</h2>
                     <form @submit.prevent="addClient">
-                        <div class="flex gap-2 max-w-md">
-                            <input type="text" x-model="newClientName"
-                                   class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                   placeholder="Client name (e.g. 'iPhone 15')" required>
+                        <div class="flex flex-wrap gap-2 items-end">
+                            <div class="flex-1 min-w-[200px]">
+                                <label class="block text-sm text-gray-600 mb-1">Client Name</label>
+                                <input type="text" x-model="newClientName"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                    placeholder="e.g. 'iPhone 15'" required>
+                            </div>
+                            
+                            <div class="w-48">
+                                <label class="block text-sm text-gray-600 mb-1">Server</label>
+                                <select x-model="selectedServerId" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                    <template x-for="server in servers" :key="server.id">
+                                        <option :value="server.id" x-text="server.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            
                             <button type="submit" 
-                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
+                                    class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 h-[42px]"
                                     :disabled="adding">
                                 <span x-show="!adding">Add Client</span>
                                 <span x-show="adding">Adding...</span>
@@ -231,6 +245,7 @@
 					<table class="w-full">
 						<thead>
 							<tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left">Server</th>
 								<th class="px-4 py-2 text-left">Name</th>
 								<th class="px-4 py-2 text-left">IP</th>
 								<th class="px-4 py-2 text-left">Public Key</th>
@@ -246,6 +261,10 @@
 						<tbody>
 							<template x-for="client in clients" :key="client.public_key">
 								<tr class="border-t" :class="{'bg-red-50': !client.is_active}">
+                                    <td class="px-4 py-2">
+                                        <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" 
+                                            x-text="client.server_name || 'local'"></span>
+                                    </td>
 									<td class="px-4 py-2" x-text="client.name"></td>
 									<td class="px-4 py-2" x-text="client.ip"></td>
 									<td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
@@ -551,6 +570,7 @@
             amneziaLink: '',
             currentSetupServerId: null,
             activeTab: 'servers',
+            selectedServerId: 1,
 
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
@@ -570,7 +590,7 @@
             showSetupModal: false,
             qrSize: 400,  // QR code size in pixels (change here to adjust)
             
-            init() {
+            async init() {
                 const token = localStorage.getItem('token');
                 const role = localStorage.getItem('role');
                 const username = localStorage.getItem('username');
@@ -581,20 +601,24 @@
                 }
                 
                 this.currentUser = username;
-                this.fetchAllData().then(() => {
-                    this.fetchTraffic();
-                });
-                this.fetchServers();
+                await this.fetchServers();  // Сначала загружаем серверы
+                
+                if (this.servers.length > 0) {
+                    this.selectedServerId = this.servers[0].id;  // Выбираем первый сервер
+                }
+                
+                await this.fetchAllData();
+                this.fetchTraffic();
                 
                 setInterval(() => {
                     this.fetchTraffic();
                 }, 5000);
                 
-                // Периодически обновляем статусы серверов
                 setInterval(() => {
                     this.servers.forEach(server => this.fetchServerStatus(server.id));
                 }, 30000);
             },
+            
             async fetchAllData() {
                 try {
                     const token = localStorage.getItem('token');
@@ -627,53 +651,54 @@
                 }
             },
             
-            async fetchTraffic() {
+            async fetchAllData() {
                 try {
-                    const response = await fetch('/api/traffic', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
+                    const token = localStorage.getItem('token');
                     
-                    if (response.ok) {
-                        const trafficData = await response.json();
-                        this.traffic = trafficData;
-                        
-                        // Получаем свежие лимиты и статусы
-                        const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
+                    // Получаем список серверов сначала
+                    await this.fetchServers();
+                    
+                    // Затем получаем клиентов с каждого сервера
+                    const allClients = [];
+                    for (const server of this.servers) {
+                        const clientsRes = await fetch(`/api/clients?server_id=${server.id}`, { 
+                            headers: { 'Authorization': `Bearer ${token}` } 
                         });
                         
-                        if (limitsResponse.ok) {
-                            const limits = await limitsResponse.json();
-                            const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
+                        if (clientsRes.ok) {
+                            const serverClients = await clientsRes.json();
+                            // Добавляем информацию о сервере к каждому клиенту
+                            serverClients.forEach(c => {
+                                c.server_id = server.id;
+                                c.server_name = server.name;
                             });
-                            
-                            const trafficMap = {};
-                            trafficData.forEach(t => {
-                                trafficMap[t.public_key] = t;
-                            });
-                            
-                            this.clients = this.clients.map(client => {
-                                const t = trafficMap[client.public_key];
-                                const limitData = limitsMap[client.public_key];
-                                
-                                return {
-                                    ...client,
-                                    traffic: t?.transfer || '0 B',
-                                    handshake: t?.latest_handshake || 'Never',
-                                    used: limitData?.used || client.used,
-                                    is_active: limitData?.is_active !== false  // ← обновляем статус
-                                };
-                            });
+                            allClients.push(...serverClients);
                         }
                     }
+                    
+                    const [limitsRes, usersRes] = await Promise.all([
+                        fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }),
+                    ]);
+                    
+                    if (limitsRes.ok && usersRes.ok) {
+                        const limits = await limitsRes.json();
+                        const users = await usersRes.json();
+                        
+                        const limitsMap = {};
+                        limits.forEach(l => limitsMap[l.public_key] = l);
+                        
+                        this.clients = allClients.map(client => ({
+                            ...client,
+                            limit: limitsMap[client.public_key]?.limit,
+                            used: limitsMap[client.public_key]?.used || 0,
+                            is_active: limitsMap[client.public_key]?.is_active !== false
+                        }));
+                        
+                        this.users = users;
+                    }
                 } catch (err) {
-                    console.error('Failed to fetch traffic');
+                    this.error = 'Failed to load data';
                 }
             },
             
@@ -683,7 +708,12 @@
                 this.success = '';
                 
                 try {
-                    const response = await fetch('/api/clients', {
+                    // Добавляем server_id в запрос
+                    const url = this.selectedServerId && this.selectedServerId !== 1 
+                        ? `/api/clients?server_id=${this.selectedServerId}`
+                        : '/api/clients';
+                    
+                    const response = await fetch(url, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -694,14 +724,16 @@
                     
                     if (response.ok) {
                         const newClient = await response.json();
-                        // Save returned config (contains PrivateKey) so we can show it without extra fetch
-                        if (newClient.config) newClient.config = newClient.config;
+                        // Добавляем информацию о сервере
+                        const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
+                        newClient.server_name = server?.name || 'local';
+                        newClient.server_id = this.selectedServerId || 1;
+                        
                         this.clients.push(newClient);
                         this.newClientName = '';
                         this.success = 'Client added successfully';
                         setTimeout(() => this.success = '', 3000);
-
-                        // If API returned config, display it directly to ensure PrivateKey is shown
+                        
                         this.showConfig(newClient);
                     } else {
                         const error = await response.json();
@@ -1197,27 +1229,22 @@
                 this.setupLogs = [];
                 this.showSetupModal = true;
                 
-                // Используем пароль из данных сервера
-                let sudoPassword = null;
-                const server = this.servers.find(s => s.id === serverId);
-                if (server?.auth_type === 'key+sudo' || server?.auth_type === 'password') {
-                    sudoPassword = server.password;
-                }
-                
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const ws = new WebSocket(`${protocol}//${window.location.host}/api/servers/${serverId}/setup-ws`);
                 
                 ws.onopen = () => {
+                    console.log('WebSocket opened, sending token...');
                     ws.send(JSON.stringify({
-                        token: localStorage.getItem('token'),
-                        sudo_password: sudoPassword
+                        token: localStorage.getItem('token')
+                        // не отправляем sudo_password - он берется из БД на сервере
                     }));
                 };
                 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
+                    console.log('Received:', data);
                     this.setupLogs.push(data);
-                    // Автоскролл вниз
+                    
                     this.$nextTick(() => {
                         const logContainer = document.querySelector('.bg-gray-900');
                         if (logContainer) {
@@ -1227,10 +1254,12 @@
                 };
                 
                 ws.onerror = (error) => {
-                    this.setupLogs.push({ type: 'error', message: 'WebSocket error' });
+                    console.error('WebSocket error:', error);
+                    this.setupLogs.push({ type: 'error', message: 'WebSocket error occurred' });
                 };
                 
                 ws.onclose = () => {
+                    console.log('WebSocket closed');
                     this.fetchServerStatus(serverId);
                 };
             },

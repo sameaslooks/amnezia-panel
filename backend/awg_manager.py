@@ -17,6 +17,7 @@ class AWGManager:
         self.server_id = server_id
         self.container_name = "amnezia-awg2"  # всегда одинаковое
         self.connection_type = 'local'  # по умолчанию
+        self.auth_type = 'local'
         self.ssh_client = None
         self.host = None
         self.port = 22
@@ -32,7 +33,7 @@ class AWGManager:
     async def _exec_in_container(self, command: str) -> str:
         """Асинхронно выполняет команду в контейнере"""
         if self.connection_type == 'local':
-            # Локальный режим (оставляем subprocess, но можно тоже сделать асинхронным через asyncio.create_subprocess_exec)
+            # Локальный режим
             try:
                 result = subprocess.run(
                     ["docker", "exec", self.container_name, "bash", "-c", command],
@@ -49,13 +50,16 @@ class AWGManager:
                 
                 # Экранируем команду
                 escaped_command = command.replace('"', '\\"').replace("'", "\\'")
-                docker_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
                 
-                # Добавляем sudo если нужно
+                # Формируем команду с sudo если нужно
                 if hasattr(self, 'sudo_password'):
-                    docker_cmd = f"sudo {docker_cmd}"
+                    # Используем sudo с паролем
+                    docker_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
+                    full_cmd = f"echo '{self.sudo_password}' | sudo -S bash -c \"{docker_cmd}\""
+                else:
+                    full_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
                 
-                result = await self.ssh_connection.run(docker_cmd)
+                result = await self.ssh_connection.run(full_cmd)
                 
                 if result.returncode != 0:
                     return ""
@@ -65,6 +69,56 @@ class AWGManager:
             except Exception as e:
                 print(f"SSH execution error: {e}")
                 return ""
+
+    async def _write_file_in_container(self, path: str, content: str) -> bool:
+        """Безопасно записывает файл в контейнер"""
+        if self.connection_type == 'local':
+            # Локальный режим
+            try:
+                # Экранируем content для передачи в команду
+                escaped_content = content.replace('"', '\\"').replace("'", "'\\''")
+                cmd = f"cat > {path} << 'EOF'\n{content}\nEOF"
+                subprocess.run(
+                    ["docker", "exec", self.container_name, "bash", "-c", cmd],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                return True
+            except:
+                return False
+        else:
+            try:
+                await self._connect_ssh()
+                
+                # Создаём временный файл на хосте
+                import uuid
+                temp_local = f"/tmp/awg_local_{uuid.uuid4().hex}"
+                temp_remote = f"/tmp/awg_remote_{uuid.uuid4().hex}"
+                
+                # Записываем локально
+                with open(temp_local, 'w') as f:
+                    f.write(content)
+                
+                # Копируем на удалённый сервер
+                await asyncssh.scp(temp_local, (self.ssh_connection, temp_remote))
+                
+                # Копируем в контейнер
+                docker_cmd = f"docker cp {temp_remote} {self.container_name}:{path}"
+                if hasattr(self, 'sudo_password'):
+                    docker_cmd = f"sudo {docker_cmd}"
+                
+                result = await self.ssh_connection.run(docker_cmd)
+                
+                # Очистка
+                os.unlink(temp_local)
+                await self.ssh_connection.run(f"rm -f {temp_remote}")
+                
+                return result.returncode == 0
+                
+            except Exception as e:
+                print(f"Error writing file: {e}")
+                return False
     
     async def get_clients(self) -> List[Dict]:
         """Получает клиентов из clientsTable с именами устройств"""
@@ -173,15 +227,17 @@ class AWGManager:
         
         # Добавляем секцию пира в конфиг (с PSK)
         peer_section = f"""
-[Peer]
-PublicKey = {public_key}
-PresharedKey = {psk}
-AllowedIPs = {next_ip}
-"""
+    [Peer]
+    PublicKey = {public_key}
+    PresharedKey = {psk}
+    AllowedIPs = {next_ip}
+    """
         new_config = config.rstrip() + "\n" + peer_section
         
         # Записываем новый конфиг в файл
-        await self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
+        success = await self._write_file_in_container("/opt/amnezia/awg/awg0.conf", new_config)
+        if not success:
+            raise Exception("Failed to write config file")
         
         # Синхронизируем интерфейс с файлом
         await self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
@@ -206,19 +262,24 @@ AllowedIPs = {next_ip}
         
         # Записываем обновленную таблицу
         import json as json_lib
-        await self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
+        await self._write_file_in_container(
+            "/opt/amnezia/awg/clientsTable", 
+            json_lib.dumps(clients_table, indent=4)
+        )
         
         # Получаем параметры сервера для конфига клиента
         client_config = await self.get_client_config(public_key)
         
         from database import create_client
-        create_client(public_key, name, next_ip, private_key)
-        # Save client config file inside the AWG container for later recovery
+        create_client(public_key, name, next_ip, private_key, self.server_id or 1)
+        
+        # Save client config file
         safe_path = f"/opt/amnezia/awg/client_configs"
-        write_cmd = (
-            f"mkdir -p {safe_path} && cat > {safe_path}/{public_key}.conf << 'EOF'\n{client_config}\nEOF"
+        await self._write_file_in_container(
+            f"{safe_path}/{public_key}.conf",
+            client_config
         )
-        await self._exec_in_container(write_cmd)
+        
         return {
             "name": name,
             "ip": next_ip,
@@ -243,6 +304,7 @@ AllowedIPs = {next_ip}
                 new_lines.append(line)
             elif in_peer_section:
                 if f"PublicKey = {public_key}" in line:
+                    # Нашли нужный пир - удаляем всю секцию
                     while new_lines and new_lines[-1] != '[Peer]':
                         new_lines.pop()
                     if new_lines and new_lines[-1] == '[Peer]':
@@ -271,7 +333,7 @@ AllowedIPs = {next_ip}
         new_config = '\n'.join(cleaned_lines)
         
         # Записываем новый конфиг
-        await self._exec_in_container(f"cat > /opt/amnezia/awg/awg0.conf << 'EOF'\n{new_config}\nEOF")
+        await self._write_file_in_container("/opt/amnezia/awg/awg0.conf", new_config)
         
         # Синхронизируем интерфейс с файлом
         await self._exec_in_container("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
@@ -283,9 +345,15 @@ AllowedIPs = {next_ip}
             clients_table = [item for item in clients_table if item.get("clientId") != public_key]
             
             import json as json_lib
-            await self._exec_in_container(f"cat > /opt/amnezia/awg/clientsTable << 'EOF'\n{json_lib.dumps(clients_table, indent=4)}\nEOF")
+            await self._write_file_in_container(
+                "/opt/amnezia/awg/clientsTable",
+                json_lib.dumps(clients_table, indent=4)
+            )
         except:
             pass
+
+        # Удаляем конфиг клиента
+        await self._exec_in_container(f"rm -f /opt/amnezia/awg/client_configs/{public_key}.conf 2>/dev/null || true")
 
     async def get_client_config(self, public_key: str) -> str:
         """Генерирует конфиг для клиента по его публичному ключу"""
@@ -750,8 +818,11 @@ AllowedIPs = {next_ip}
     # ========== MULTI-SERVER MANAGEMENT ==========
     def _setup_from_params(self, params: Dict):
         """Настраивает подключение из переданных параметров"""
+        print(f"Setup from params: {params}")  # отладка
         self.connection_type = params.get('type', 'local')
-        
+        self.auth_type = params.get('auth_type', 'local')
+        print(f"Auth type set to: {self.auth_type}")  # отладка
+
         if self.connection_type == 'remote':
             self.host = params.get('host')
             self.port = params.get('port', 22)
@@ -761,7 +832,6 @@ AllowedIPs = {next_ip}
             
             if not self.host or not self.username:
                 raise ValueError("host and username required for remote connection")
-        # для local ничего не нужно
 
     def _setup_from_db(self, server_id: int):
         """Загружает параметры сервера из БД"""
@@ -771,6 +841,8 @@ AllowedIPs = {next_ip}
         if not server:
             raise ValueError(f"Server with ID {server_id} not found")
         
+        self.auth_type = server['auth_type']
+
         if server['auth_type'] == 'local':
             self.connection_type = 'local'
         else:
@@ -794,28 +866,30 @@ AllowedIPs = {next_ip}
                 'known_hosts': None  # Отключаем проверку known_hosts для простоты
             }
             
-            if self.private_key:
+            # Добавляем аутентификацию
+            if self.private_key and self.private_key.strip():
+                # Создаём временный файл с ключом
                 import tempfile
                 import os
                 
-                # Создаём временный файл с правильными правами
                 with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
                     f.write(self.private_key)
                     temp_key_path = f.name
                 
-                # Устанавливаем правильные права доступа (600)
                 os.chmod(temp_key_path, 0o600)
-                
-                # Используем путь к файлу
                 connect_kwargs['client_keys'] = [temp_key_path]
-                self.temp_key_path = temp_key_path  # сохраняем для удаления
+                self.temp_key_path = temp_key_path
                 
             elif self.password:
                 connect_kwargs['password'] = self.password
+                connect_kwargs['client_keys'] = None  # Явно указываем что не используем ключи
                 
+            print(f"Connecting to {self.host}:{self.port} as {self.username}")
             self.ssh_connection = await asyncssh.connect(**connect_kwargs)
-                    
+            print("SSH connection established")
+            
         except Exception as e:
+            print(f"SSH connection failed: {e}")
             raise Exception(f"SSH connection failed: {e}")
 
     async def _close_ssh(self):
@@ -836,218 +910,344 @@ AllowedIPs = {next_ip}
     async def setup_server_stream(self, sudo_password: Optional[str] = None):
         """
         Установка AmneziaWG с потоковой передачей логов в реальном времени.
-        Для локального режима не используется (вызывать только для remote).
-        
-        Args:
-            sudo_password: Пароль для sudo (если требуется)
-        
-        Yields:
-            Dict с шагом установки
         """
         if self.connection_type == 'local':
             yield {"type": "error", "message": "Setup is only for remote servers"}
             return
         
-        # Сохраняем sudo_password для кеширования
-        if sudo_password:
+        # Проверяем метод аутентификации
+        if self.auth_type == 'key':
+            # Только ключ, пароль не нужен
+            if not self.private_key:
+                yield {"type": "error", "message": "Private key is required for key authentication"}
+                return
+            else:
+                self.sudo_password = ""
+            # sudo_password не устанавливаем - будем использовать sudo без пароля
+        
+        elif self.auth_type == 'password':
+            # Пароль для SSH и sudo
+            if not self.password:
+                yield {"type": "error", "message": "Password is required for password authentication"}
+                return
+            self.sudo_password = self.password
+        
+        elif self.auth_type == 'key+sudo':
+            # Ключ для SSH + отдельный пароль для sudo
+            if not self.private_key:
+                yield {"type": "error", "message": "Private key is required for key+sudo authentication"}
+                return
+            if not sudo_password:
+                yield {"type": "error", "message": "sudo password is required for key+sudo authentication"}
+                return
             self.sudo_password = sudo_password
         
+        else:
+            yield {"type": "error", "message": f"Unknown auth type: {self.auth_type}"}
+            return
+        
         try:
-            # Подключаемся и кешируем sudo
+            yield {"type": "info", "message": "🔄 Connecting to server..."}
             await self._connect_ssh()
             yield {"type": "info", "message": "✅ Connected to server"}
 
-            if sudo_password:
-                self.sudo_password = sudo_password
-
-                sudoers_cmd = (
-                    "echo '{pwd}' | sudo -S -p '' bash -c "
-                    "'echo \"{user} ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/awg-installer'"
-                ).format(
-                    pwd=sudo_password.replace("'", "'\"'\"'"),
-                    user=self.username
-                )
-
-                check_cmd = (
-                    "echo '{pwd}' | sudo -S -p '' visudo -cf /etc/sudoers.d/awg-installer"
-                ).format(
-                    pwd=sudo_password.replace("'", "'\"'\"'")
-                )
-
-                r1 = await self.ssh_connection.run(sudoers_cmd)
-                if r1.returncode != 0:
-                    raise Exception("Failed to create temporary sudoers rule")
-
-                r2 = await self.ssh_connection.run(check_cmd)
-                if r2.returncode != 0:
-                    # пробуем убрать файл, если он битый
-                    await self.ssh_connection.run(
-                        "echo '{pwd}' | sudo -S -p '' rm -f /etc/sudoers.d/awg-installer"
-                        .format(pwd=sudo_password.replace("'", "'\"'\"'"))
-                    )
-                    raise Exception("Invalid sudoers rule created")
+            async def run_script(script_content: str, step_name: str) -> tuple:
+                import uuid
+                remote_script = f"/tmp/setup_{uuid.uuid4().hex}.sh"
+                write_cmd = f"cat > {remote_script} << 'SCRIPTEOF'\n{script_content}\nSCRIPTEOF"
+                result = await self.ssh_connection.run(write_cmd)
+                if result.returncode != 0:
+                    return False, "", f"Failed to create script: {result.stderr}"
+                await self.ssh_connection.run(f"chmod +x {remote_script}")
+                full_cmd = f"echo '{self.sudo_password}' | sudo -S {remote_script}"
+                result = await self.ssh_connection.run(full_cmd)
+                await self.ssh_connection.run(f"rm -f {remote_script}")
+                return result.returncode == 0, result.stdout or "", result.stderr or ""
             
-            # Список команд установки
-            commands = [
-                ("📦 Checking if Docker already installed", 
-                "if command -v docker >/dev/null 2>&1; then "
-                "echo 'DOCKER_ALREADY_INSTALLED'; "
-                "else echo 'DOCKER_NEEDS_INSTALL'; fi"),
-                
-                ("🔧 Cleaning old Docker repository entries", 
-                "sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources"),
-                
-                ("🔧 Setting up Docker repository", 
-                "if [ ! -f /etc/apt/keyrings/docker.asc ]; then "
-                "sudo apt update && "
-                "sudo apt install -y ca-certificates curl && "
-                "sudo install -m 0755 -d /etc/apt/keyrings && "
-                "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && "
-                "sudo chmod a+r /etc/apt/keyrings/docker.asc && "
-                "sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 7EA0A9C3F273FCD8; "
-                "fi"),
-                
-                ("🔧 Adding Docker repository", 
-                "CODENAME=$(lsb_release -cs) && "
-                "sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null << EOF\n"
-                "Types: deb\n"
-                "URIs: https://download.docker.com/linux/ubuntu\n"
-                "Suites: $CODENAME\n"
-                "Components: stable\n"
-                "Signed-By: /etc/apt/keyrings/docker.asc\n"
-                "EOF"),
-                
-                ("🔧 Installing Docker if needed", 
-                "if ! command -v docker >/dev/null 2>&1; then "
-                "sudo apt update && "
-                "sudo apt install -y docker-ce docker-ce-cli containerd.io; "
-                "else echo 'Docker already installed, skipping...'; fi"),
-                
-                ("👤 Adding user to docker group", 
-                f"sudo usermod -aG docker {self.username} || true"),
-                
-                ("📁 Creating directories", 
-                "sudo mkdir -p /opt/amnezia/awg /opt/amnezia/backups"),
-                
-                ("📝 Creating Dockerfile", 
-                "sudo tee /opt/amnezia/Dockerfile > /dev/null << 'EOF'\n"
-                "FROM amneziavpn/amneziawg-go:latest\n\n"
-                "# Исправляем репозитории Alpine\n"
-                "RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories || true\n"
-                "RUN apk update && apk add --no-cache bash curl dumb-init\n"
-                "RUN mkdir -p /opt/amnezia\n"
-                "RUN echo -e '#!/bin/bash\\ntail -f /dev/null' > /opt/amnezia/start.sh\n"
-                "RUN chmod a+x /opt/amnezia/start.sh\n"
-                "ENTRYPOINT [\"dumb-init\", \"/opt/amnezia/start.sh\"]\n"
-                "EOF"),
-                
-                ("🔨 Building Docker image", 
-                "cd /opt/amnezia && sudo docker build -t amnezia-awg2 ."),
-                
-                ("🔄 Stopping old container", 
-                "sudo docker stop amnezia-awg2 2>/dev/null || true && "
-                "sudo docker rm amnezia-awg2 2>/dev/null || true"),
-                
-                ("🚀 Starting container", 
-                "sudo docker run -d --name amnezia-awg2 "
-                "--cap-add=NET_ADMIN --cap-add=NET_RAW "
-                "--device=/dev/net/tun "
-                "-v /opt/amnezia/awg:/opt/amnezia/awg "
-                "-v /opt/amnezia/backups:/opt/amnezia/backups "
-                "--restart unless-stopped "
-                "-p 32308:32308/udp "
-                "-e AWG_SUBNET_IP=10.8.1.0 "
-                "-e WIREGUARD_SUBNET_CIDR=24 "
-                "amnezia-awg2"),
-                
-                ("📋 Generating server keys", 
-                "sudo docker exec amnezia-awg2 sh -c '"
-                "rm -f /opt/amnezia/awg/server_private.key /opt/amnezia/awg/server_public.key && "
-                "PRIVATE_KEY=$(awg genkey) && "
-                "echo \"$PRIVATE_KEY\" > /opt/amnezia/awg/server_private.key && "
-                "echo \"$PRIVATE_KEY\" | awg pubkey > /opt/amnezia/awg/server_public.key'"),
-                
-                ("📝 Creating server config", 
-                "sudo docker exec amnezia-awg2 sh -c '"
-                "PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key) && "
-                "cat > /opt/amnezia/awg/awg0.conf << EOF\n"
-                "[Interface]\n"
-                "Address = 10.8.1.1/24\n"
-                "ListenPort = 32308\n"
-                "PrivateKey = $PRIVATE_KEY\n"
-                "Jc = 4\n"
-                "Jmin = 10\n"
-                "Jmax = 50\n"
-                "S1 = 95\n"
-                "S2 = 21\n"
-                "S3 = 6\n"
-                "S4 = 10\n"
-                "H1 = 1144016577-1678296790\n"
-                "H2 = 2067003202-2073469039\n"
-                "H3 = 2118455839-2136843295\n"
-                "H4 = 2142407594-2142521231\n"
-                "EOF'"),
-                
-                ("📝 Creating startup script", 
-                "sudo docker exec amnezia-awg2 sh -c '"
-                "cat > /opt/amnezia/start.sh << 'EOF'\n"
-                "#!/bin/bash\n"
-                "awg-quick up /opt/amnezia/awg/awg0.conf\n"
-                "iptables -A INPUT -i awg0 -j ACCEPT\n"
-                "iptables -A FORWARD -i awg0 -j ACCEPT\n"
-                "iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o eth0 -j MASQUERADE\n"
-                "tail -f /dev/null\n"
-                "EOF'"),
-                
-                ("🔧 Setting execute permission", 
-                "sudo docker exec amnezia-awg2 chmod +x /opt/amnezia/start.sh"),
-                
-                ("🔄 Restarting container", 
-                "sudo docker restart amnezia-awg2"),
-                
-                ("✅ Checking container", 
-                "sudo docker ps --filter name=amnezia-awg2 --format '{{.Status}}'")
-            ]
+            # Проверка sudo
+            test_script = """#!/bin/bash
+echo "sudo test successful"
+exit 0
+"""
+            success, stdout, stderr = await run_script(test_script, "Testing sudo")
+            if not success:
+                yield {"type": "error", "message": f"❌ sudo failed: {stderr}"}
+                return
+            yield {"type": "info", "message": "✅ sudo access granted"}
             
-            for step_name, cmd in commands:
-                try:
-                    proc = await self.ssh_connection.run(cmd)
-                    success = proc.returncode == 0
-                    
-                    yield {
-                        "type": "step",
-                        "name": step_name,
-                        "success": success,
-                        "output": proc.stdout or proc.stderr
-                    }
-                    
-                    if not success:
-                        yield {"type": "warning", "message": f"Step {step_name} failed but continuing"}
-                        
-                except Exception as e:
-                    yield {
-                        "type": "error",
-                        "name": step_name,
-                        "error": str(e)
-                    }
+            # 1. Проверка Docker
+            check_docker_script = """#!/bin/bash
+if command -v docker >/dev/null 2>&1; then
+    echo "DOCKER_ALREADY_INSTALLED"
+else
+    echo "DOCKER_NEEDS_INSTALL"
+fi
+exit 0
+"""
+            success, stdout, stderr = await run_script(check_docker_script, "Checking Docker")
+            docker_status = stdout.strip()
+            yield {
+                "type": "step",
+                "name": "📦 Checking if Docker already installed",
+                "success": True,
+                "output": docker_status
+            }
             
-            # Финальная проверка
-            check = await self.ssh_connection.run("sudo docker ps --filter name=amnezia-awg2 --format '{{.Status}}'")
-            if check.returncode == 0 and "Up" in check.stdout:
-                yield {"type": "success", "message": "✅ Server is ready!", "output": check.stdout}
+            # 2. Установка Docker если нужно
+            if "NEEDS_INSTALL" in docker_status:
+                install_docker_script = """#!/bin/bash
+set -e
+apt update
+apt install -y docker.io
+systemctl start docker
+systemctl enable docker
+docker --version
+echo "Docker installed successfully"
+exit 0
+"""
+                success, stdout, stderr = await run_script(install_docker_script, "Installing Docker")
+                yield {
+                    "type": "step",
+                    "name": "🔧 Installing Docker",
+                    "success": success,
+                    "output": stdout if success else stderr
+                }
+                if not success:
+                    yield {"type": "error", "message": "Docker installation failed, aborting"}
+                    return
+            
+            # 3. Добавление пользователя в группу docker
+            add_user_script = f"""#!/bin/bash
+usermod -aG docker {self.username} || true
+echo "User added to docker group"
+exit 0
+"""
+            success, stdout, stderr = await run_script(add_user_script, "Adding user to docker group")
+            yield {
+                "type": "step",
+                "name": "👤 Adding user to docker group",
+                "success": success,
+                "output": stdout
+            }
+            
+            # 4. Создание Dockerfile
+            dockerfile_script = """#!/bin/bash
+mkdir -p /opt/amnezia
+cat > /opt/amnezia/Dockerfile << 'EOF'
+FROM amneziavpn/amneziawg-go:latest
+
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories || true
+RUN apk update && apk add --no-cache bash curl dumb-init iptables ip6tables
+
+# Создаём start.sh
+RUN mkdir -p /opt/amnezia && \\
+    echo '#!/bin/bash' > /opt/amnezia/start.sh && \\
+    echo 'echo "Starting AmneziaWG..."' >> /opt/amnezia/start.sh && \\
+    echo 'if [ -f /opt/amnezia/awg/awg0.conf ]; then' >> /opt/amnezia/start.sh && \\
+    echo '    awg-quick up /opt/amnezia/awg/awg0.conf' >> /opt/amnezia/start.sh && \\
+    echo 'fi' >> /opt/amnezia/start.sh && \\
+    echo 'iptables -A INPUT -i awg0 -j ACCEPT 2>/dev/null || true' >> /opt/amnezia/start.sh && \\
+    echo 'iptables -A FORWARD -i awg0 -j ACCEPT 2>/dev/null || true' >> /opt/amnezia/start.sh && \\
+    echo 'iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o eth0 -j MASQUERADE 2>/dev/null || true' >> /opt/amnezia/start.sh && \\
+    echo 'tail -f /dev/null' >> /opt/amnezia/start.sh && \\
+    chmod +x /opt/amnezia/start.sh
+
+ENTRYPOINT ["dumb-init", "/opt/amnezia/start.sh"]
+EOF
+echo "Dockerfile created"
+exit 0
+"""
+            success, stdout, stderr = await run_script(dockerfile_script, "Creating Dockerfile")
+            yield {
+                "type": "step",
+                "name": "📝 Creating Dockerfile",
+                "success": success,
+                "output": stdout
+            }
+            
+            # 5. Сборка Docker образа
+            build_script = """#!/bin/bash
+cd /opt/amnezia
+docker build -t amnezia-awg2 .
+echo "Docker image built"
+docker images amnezia-awg2
+exit 0
+"""
+            success, stdout, stderr = await run_script(build_script, "Building Docker image")
+            yield {
+                "type": "step",
+                "name": "🔨 Building Docker image",
+                "success": success,
+                "output": stdout if success else stderr
+            }
+            if not success:
+                yield {"type": "error", "message": "Docker build failed, aborting"}
+                return
+            
+            # 6. Остановка старого контейнера
+            stop_script = """#!/bin/bash
+docker stop amnezia-awg2 2>/dev/null || true
+docker rm amnezia-awg2 2>/dev/null || true
+echo "Old container stopped"
+exit 0
+"""
+            success, stdout, stderr = await run_script(stop_script, "Stopping old container")
+            yield {
+                "type": "step",
+                "name": "🔄 Stopping old container",
+                "success": success,
+                "output": stdout
+            }
+            
+            # 7. Запуск контейнера
+            run_script_cmd = """#!/bin/bash
+docker run -d --name amnezia-awg2 \\
+    --cap-add=NET_ADMIN --cap-add=NET_RAW \\
+    --device=/dev/net/tun \\
+    --restart unless-stopped \\
+    -p 32308:32308/udp \\
+    amnezia-awg2
+echo "Container started"
+exit 0
+"""
+            success, stdout, stderr = await run_script(run_script_cmd, "Starting container")
+            yield {
+                "type": "step",
+                "name": "🚀 Starting container",
+                "success": success,
+                "output": stdout if success else stderr
+            }
+            
+            # 8. Генерация ключей
+            keys_script = """#!/bin/bash
+docker exec amnezia-awg2 sh -c '
+mkdir -p /opt/amnezia/awg /opt/amnezia/backups /opt/amnezia/client_configs
+rm -f /opt/amnezia/awg/server_private.key /opt/amnezia/awg/server_public.key
+PRIVATE_KEY=$(awg genkey)
+echo "$PRIVATE_KEY" > /opt/amnezia/awg/server_private.key
+echo "$PRIVATE_KEY" | awg pubkey > /opt/amnezia/awg/server_public.key
+echo "Keys generated"
+'
+exit 0
+"""
+            success, stdout, stderr = await run_script(keys_script, "Generating server keys")
+            yield {
+                "type": "step",
+                "name": "📋 Generating server keys",
+                "success": success,
+                "output": stdout if success else stderr
+            }
+            
+            # 9. Создание конфига сервера
+            config_script = """#!/bin/bash
+docker exec amnezia-awg2 sh -c '
+PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key)
+cat > /opt/amnezia/awg/awg0.conf << EOF
+[Interface]
+Address = 10.8.1.1/24
+ListenPort = 32308
+PrivateKey = $PRIVATE_KEY
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 95
+S2 = 21
+S3 = 6
+S4 = 10
+H1 = 1144016577-1678296790
+H2 = 2067003202-2073469039
+H3 = 2118455839-2136843295
+H4 = 2142407594-2142521231
+EOF
+echo "Server config created"
+'
+exit 0
+"""
+            success, stdout, stderr = await run_script(config_script, "Creating server config")
+            yield {
+                "type": "step",
+                "name": "📝 Creating server config",
+                "success": success,
+                "output": stdout if success else stderr
+            }
+            
+            # 10. Создание startup скрипта
+            startup_script = """#!/bin/bash
+docker exec amnezia-awg2 sh -c '
+cat > /opt/amnezia/start.sh << "EOF"
+#!/bin/bash
+echo "Starting AmneziaWG..."
+awg-quick down /opt/amnezia/awg/awg0.conf 2>/dev/null || true
+if [ -f /opt/amnezia/awg/awg0.conf ]; then
+    awg-quick up /opt/amnezia/awg/awg0.conf
+fi
+iptables -A INPUT -i awg0 -j ACCEPT 2>/dev/null || true
+iptables -A FORWARD -i awg0 -j ACCEPT 2>/dev/null || true
+iptables -t nat -A POSTROUTING -s 10.8.1.0/24 -o eth0 -j MASQUERADE 2>/dev/null || true
+tail -f /dev/null
+EOF
+chmod +x /opt/amnezia/start.sh
+echo "Startup script created"
+'
+exit 0
+"""
+            success, stdout, stderr = await run_script(startup_script, "Creating startup script")
+            yield {
+                "type": "step",
+                "name": "📝 Creating startup script",
+                "success": success,
+                "output": stdout
+            }
+            
+            # 11. Перезапуск контейнера
+            restart_script = """#!/bin/bash
+docker restart amnezia-awg2
+echo "Container restarted"
+exit 0
+"""
+            success, stdout, stderr = await run_script(restart_script, "Restarting container")
+            yield {
+                "type": "step",
+                "name": "🔄 Restarting container",
+                "success": success,
+                "output": stdout if success else stderr
+            }
+            
+            # 12. Проверка статуса
+            import asyncio
+            await asyncio.sleep(3)
+            
+            check_script = """#!/bin/bash
+if docker ps --filter name=amnezia-awg2 --format '{{.Status}}' | grep -q "Up"; then
+    echo "RUNNING"
+    docker ps --filter name=amnezia-awg2
+else
+    echo "NOT_RUNNING"
+    docker ps -a --filter name=amnezia-awg2
+fi
+exit 0
+"""
+            success, status, stderr = await run_script(check_script, "Final check")
+            
+            # 13. Включение IP forwarding
+            ip_forward_script = """#!/bin/bash
+sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+echo "IP forwarding enabled"
+exit 0
+"""
+            await run_script(ip_forward_script, "Enabling IP forwarding")
+            
+            if "RUNNING" in status:
+                yield {"type": "success", "message": "✅ Server is ready!", "output": status}
             else:
-                yield {"type": "error", "message": "❌ Server is not running", "output": check.stderr}
+                yield {"type": "error", "message": "❌ Server is not running", "output": status}
             
         except Exception as e:
+            print(f"Setup error: {e}")
             yield {"type": "error", "message": str(e)}
         finally:
-            if hasattr(self, "sudo_password") and self.sudo_password:
-                try:
-                    await self.ssh_connection.run(
-                        "sudo rm -f /etc/sudoers.d/awg-installer"
-                    )
-                except:
-                    pass
+            await self._close_ssh()
 
     async def get_server_status(self) -> Dict:
         """
