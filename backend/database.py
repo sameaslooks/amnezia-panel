@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -32,6 +33,7 @@ def init_db():
             private_key TEXT,
             traffic_limit_bytes INTEGER,
             traffic_used_bytes INTEGER DEFAULT 0,
+            expiry_date TIMESTAMP,
             is_active BOOLEAN DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -47,6 +49,13 @@ def init_db():
         c.execute("ALTER TABLE clients ADD COLUMN server_id INTEGER DEFAULT 1")
         c.execute("ALTER TABLE clients ADD COLUMN server_name TEXT DEFAULT 'local'")
         print("Added server_id and server_name columns to clients table")
+    
+    # Добавляем expiry_date если её нет (для существующих БД)
+    try:
+        c.execute("SELECT expiry_date FROM clients LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE clients ADD COLUMN expiry_date TIMESTAMP")
+        print("Added expiry_date column to clients table")
     ##################################################
 
     # Таблица истории трафика
@@ -105,11 +114,24 @@ def init_db():
     
     conn.close()
 
+def run_async(coro):
+    """Запускает асинхронную функцию из синхронного кода в асинхронном контексте"""
+    try:
+        # Если уже есть запущенный цикл (мы в FastAPI), создаём задачу
+        loop = asyncio.get_running_loop()
+        # Создаём задачу, но не ждём её результат
+        return asyncio.create_task(coro)
+    except RuntimeError:
+        # Нет запущенного цикла - создаём новый
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+
 def get_client(public_key: str):
     """Получает данные клиента"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT name, ip, private_key, traffic_limit_bytes, traffic_used_bytes, is_active FROM clients WHERE public_key = ?', 
+    c.execute('SELECT name, ip, private_key, traffic_limit_bytes, traffic_used_bytes, expiry_date, is_active FROM clients WHERE public_key = ?', 
               (public_key,))
     result = c.fetchone()
     conn.close()
@@ -121,7 +143,8 @@ def get_client(public_key: str):
             "private_key": result[2],
             "limit": result[3],
             "used": result[4],
-            "is_active": bool(result[5])
+            "expiry_date": result[5],
+            "is_active": bool(result[6])
         }
     return None
 
@@ -179,7 +202,7 @@ def set_client_limit(public_key: str, limit_bytes: int):
     # Разблокируем в iptables
     from awg_manager import AWGManager
     awg = AWGManager()
-    awg.unblock_client(public_key)
+    run_async(awg.unblock_client(public_key))
 
 def update_traffic_usage(public_key: str, received: int, sent: int, awg_manager=None):
     """Обновляет трафик и блокирует при превышении"""
@@ -212,14 +235,16 @@ def update_traffic_usage(public_key: str, received: int, sent: int, awg_manager=
         
         # Блокируем в iptables
         if awg_manager:
-            awg_manager.block_client(public_key)
+            run_async(awg_manager.block_client(public_key))
         return
     
     conn.close()
 
 
-def check_and_deactivate_overlimit():
-    """Проверяет клиентов, превысивших лимит, и деактивирует их"""
+def check_and_deactivate_overlimit(awg_manager=None):
+    """
+    Проверяет клиентов, превысивших лимит трафика, и деактивирует их
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
@@ -236,6 +261,10 @@ def check_and_deactivate_overlimit():
     for (public_key,) in overlimit:
         print(f"Client {public_key} over limit, deactivating")
         c.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (public_key,))
+        
+        # Блокируем в iptables если передан менеджер
+        if awg_manager:
+            run_async(awg_manager.block_client(public_key))
     
     conn.commit()
     conn.close()
@@ -272,14 +301,14 @@ def get_all_clients(server_id: Optional[int] = None):
     
     if server_id:
         c.execute('''
-            SELECT public_key, name, ip, traffic_limit_bytes, traffic_used_bytes, is_active, server_id, server_name
+            SELECT public_key, name, ip, traffic_limit_bytes, traffic_used_bytes, expiry_date, is_active, server_id, server_name
             FROM clients
             WHERE server_id = ?
             ORDER BY created_at DESC
         ''', (server_id,))
     else:
         c.execute('''
-            SELECT public_key, name, ip, traffic_limit_bytes, traffic_used_bytes, is_active, server_id, server_name
+            SELECT public_key, name, ip, traffic_limit_bytes, traffic_used_bytes, expiry_date, is_active, server_id, server_name
             FROM clients
             ORDER BY created_at DESC
         ''')
@@ -294,9 +323,10 @@ def get_all_clients(server_id: Optional[int] = None):
             "ip": row[2],
             "limit": row[3],
             "used": row[4],
-            "is_active": bool(row[5]),
-            "server_id": row[6],
-            "server_name": row[7]
+            "expiry_date": row[5],
+            "is_active": bool(row[6]),
+            "server_id": row[7],
+            "server_name": row[8]
         }
         for row in rows
     ]
@@ -525,8 +555,121 @@ def get_servers_for_dropdown() -> List[Dict]:
         for row in rows
     ]
 
+def set_client_expiry(public_key: str, expiry_date: Optional[str] = None):
+    """
+    Устанавливает дату истечения для клиента
+    expiry_date: строка в формате 'YYYY-MM-DD HH:MM:SS' или None для снятия лимита
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    from datetime import datetime
+    
+    # Если передана дата, проверяем не истекла ли она сразу
+    is_active = 1
+    if expiry_date:
+        try:
+            expiry = datetime.fromisoformat(expiry_date.replace(' ', 'T'))
+            if datetime.now() > expiry:
+                is_active = 0
+        except:
+            pass
+    
+    c.execute('''
+        UPDATE clients 
+        SET expiry_date = ?,
+            is_active = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE public_key = ?
+    ''', (expiry_date, is_active, public_key))
+    
+    conn.commit()
+    conn.close()
+    
+    # Синхронизируем iptables
+    from awg_manager import AWGManager
+    awg = AWGManager()
+    if is_active == 0:
+        run_async(awg.block_client(public_key))
+    else:
+        run_async(awg.unblock_client(public_key))
 
+def check_expired_clients(awg_manager=None):
+    """
+    Проверяет клиентов с истекшей датой и деактивирует их
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Находим клиентов с истекшей датой, которые ещё активны
+    c.execute('''
+        SELECT public_key FROM clients
+        WHERE expiry_date IS NOT NULL
+          AND datetime(expiry_date) <= datetime('now')
+          AND is_active = 1
+    ''')
+    
+    expired = c.fetchall()
+    
+    deactivated = []
+    for (public_key,) in expired:
+        print(f"Client {public_key} expired, deactivating")
+        c.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (public_key,))
+        deactivated.append(public_key)
+        
+        # Блокируем в iptables если передан менеджер
+        if awg_manager:
+            run_async(awg_manager.block_client(public_key))
+    
+    conn.commit()
+    conn.close()
+    return deactivated
 
+def check_all_limits(awg_manager=None):
+    """
+    Проверяет все типы лимитов (трафик и дата) и деактивирует клиентов
+    Возвращает словарь с результатами проверки
+    """
+    traffic_deactivated = check_and_deactivate_overlimit(awg_manager)
+    expiry_deactivated = check_expired_clients(awg_manager)
+    
+    return {
+        "traffic_limit_deactivated": traffic_deactivated,
+        "expiry_date_deactivated": expiry_deactivated,
+        "total_deactivated": len(traffic_deactivated) + len(expiry_deactivated)
+    }
+
+async def set_client_limit_async(public_key: str, limit_bytes: int):
+    """Асинхронная версия set_client_limit"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    if limit_bytes <= 0:
+        c.execute('''
+            UPDATE clients 
+            SET traffic_limit_bytes = NULL,
+                traffic_used_bytes = 0,
+                is_active = 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE public_key = ?
+        ''', (public_key,))
+    else:
+        c.execute('''
+            UPDATE clients 
+            SET traffic_limit_bytes = ?,
+                traffic_used_bytes = 0,
+                is_active = 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE public_key = ?
+        ''', (limit_bytes, public_key))
+    
+    conn.commit()
+    conn.close()
+    
+    # Разблокируем в iptables
+    from awg_manager import AWGManager
+    awg = AWGManager()
+    await awg.unblock_client(public_key)  # ✅ теперь можно использовать await
 
 
 # Инициализация при импорте

@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from typing import Optional
 from fastapi import WebSocket, WebSocketDisconnect
+from datetime import datetime
+from typing import Optional
 import os
 
 from database import activate_client, deactivate_client, check_and_deactivate_overlimit, get_all_users, create_user, update_user, delete_user
@@ -96,6 +98,8 @@ class ServerUpdate(BaseModel):
     private_key: Optional[str] = None
     is_active: Optional[bool] = None
 
+class ExpiryDateRequest(BaseModel):
+    expiry_date: Optional[str] = None  # формат: "2024-12-31 23:59:59"
 
 @app.post("/api/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
@@ -210,8 +214,8 @@ async def delete_client(public_key: str, request: Request, server_id: Optional[i
 # ========== LIMITS FUNCTIONS ==========
 @app.get("/api/limits")
 async def get_limits(request: Request, server_id: Optional[int] = None):
-    payload = await verify_token(request)
-    if payload.get("role") != "admin":
+    payload = get_token_payload(request)
+    if not payload or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     
     # Получаем всех клиентов из AWG
@@ -233,12 +237,23 @@ async def get_limits(request: Request, server_id: Optional[int] = None):
             )
             db_client = get_client(client["public_key"])
         
+        # Форматируем дату для отображения
+        expiry_date = db_client["expiry_date"] if db_client else None
+        if expiry_date:
+            try:
+                # Преобразуем в читаемый формат
+                dt = datetime.fromisoformat(expiry_date.replace(' ', 'T'))
+                expiry_date = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                pass
+        
         result.append({
             "public_key": client["public_key"],
             "name": client["name"],
             "ip": client["ip"],
             "limit": db_client["limit"] if db_client else None,
             "used": db_client["used"] if db_client else 0,
+            "expiry_date": expiry_date,
             "is_active": db_client["is_active"] if db_client else True
         })
     
@@ -252,14 +267,29 @@ async def set_limit(public_key: str, limit_bytes: int, request: Request, server_
     
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    from database import set_client_limit
     
-    set_client_limit(decoded_key, limit_bytes)
+    from database import set_client_limit_async
+    await set_client_limit_async(decoded_key, limit_bytes)
     
     awg = AWGManager(server_id=server_id or 1)
     await awg.unblock_client(decoded_key)
     
     return {"message": "Limit set"}
+
+@app.post("/api/clients/{public_key}/expiry")
+async def set_client_expiry_endpoint(public_key: str, request: Request, expiry: ExpiryDateRequest):
+    """Устанавливает дату истечения для клиента"""
+    payload = get_token_payload(request)
+    if not payload or payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from urllib.parse import unquote
+    decoded_key = unquote(public_key)
+    from database import set_client_expiry
+    
+    set_client_expiry(decoded_key, expiry.expiry_date)
+    
+    return {"message": "Expiry date set successfully"}
 
 @app.post("/api/clients/{public_key}/activate")
 async def activate_client_endpoint(public_key: str, request: Request):
@@ -285,13 +315,38 @@ async def deactivate_client_endpoint(public_key: str, request: Request):
 
 @app.post("/api/cron/check-limits")
 async def cron_check_limits(request: Request):
-    # Внутренний эндпоинт для cron
+    """
+    Внутренний эндпоинт для cron.
+    Проверяет лимиты трафика и даты, деактивирует клиентов.
+    """
     auth_header = request.headers.get("Authorization")
     if not auth_header or auth_header != "Bearer internal-cron-token":
         raise HTTPException(status_code=403, detail="Forbidden")
     
-    deactivated = check_and_deactivate_overlimit()
-    return {"deactivated": deactivated}
+    from database import check_and_deactivate_overlimit, check_expired_clients
+    from awg_manager import AWGManager
+    
+    # Получаем все серверы
+    from database import get_all_servers
+    servers = get_all_servers()
+    
+    results = {}
+    for server in servers:
+        if server['is_active']:
+            try:
+                awg = AWGManager(server_id=server['id'])
+                traffic_deactivated = check_and_deactivate_overlimit(awg)
+                expiry_deactivated = check_expired_clients(awg)
+                
+                results[server['id']] = {
+                    "traffic_deactivated": traffic_deactivated,
+                    "expiry_deactivated": expiry_deactivated,
+                    "total": len(traffic_deactivated) + len(expiry_deactivated)
+                }
+            except Exception as e:
+                results[server['id']] = {"error": str(e)}
+    
+    return {"results": results}
 
 @app.post("/api/iptables/sync")
 async def sync_iptables(request: Request, server_id: Optional[int] = None):

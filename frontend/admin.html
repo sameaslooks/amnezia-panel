@@ -237,6 +237,7 @@
 								<th class="px-4 py-2 text-left">Traffic</th>
 								<th class="px-4 py-2 text-left">Limit</th>
 								<th class="px-4 py-2 text-left">Used</th>
+                                <th class="px-4 py-2 text-left">Expiry Date</th>
 								<th class="px-4 py-2 text-left">Status</th>
 								<th class="px-4 py-2 text-left">Last Handshake</th>
 								<th class="px-4 py-2 text-left">Actions</th>
@@ -286,6 +287,38 @@
 											(<span x-text="((client.used/client.limit)*100).toFixed(1)"></span>%)
 										</span>
 									</td>
+
+                                    <!-- Expiry Date column -->
+                                    <td class="px-4 py-2">
+                                        <div x-data="{ editing: false, newDate: client.expiry_date || '', dateInput: '' }">
+                                            <template x-if="!editing">
+                                                <div class="flex items-center">
+                                                    <span x-text="client.expiry_date || 'No expiry'" class="text-sm"></span>
+                                                    <button @click="editing = true; dateInput = client.expiry_date ? client.expiry_date.replace(' ', 'T').substring(0,16) : ''" 
+                                                            class="ml-2 text-blue-500 text-xs hover:text-blue-700" title="Edit expiry date">
+                                                        ✎
+                                                    </button>
+                                                    <button x-show="client.expiry_date" 
+                                                            @click="setExpiry(client.public_key, null)" 
+                                                            class="ml-1 text-red-500 text-xs hover:text-red-700" title="Remove expiry date">
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            </template>
+                                            <template x-if="editing">
+                                                <div class="flex items-center gap-1">
+                                                    <input type="datetime-local" 
+                                                        x-model="dateInput" 
+                                                        class="px-1 py-0.5 border rounded text-sm"
+                                                        :min="new Date().toISOString().slice(0,16)">
+                                                    <button @click="setExpiry(client.public_key, dateInput.replace('T', ' ') + ':00'); editing = false" 
+                                                            class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
+                                                    <button @click="editing = false" 
+                                                            class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </td>
 									
 									<!-- Status column -->
 									<td class="px-4 py-2">
@@ -841,6 +874,64 @@
 				}
 				this.setLimit(publicKey, Math.round(bytes));
 			},
+
+            async setExpiry(publicKey, expiryDate) {
+                try {
+                    const response = await fetch(`/api/clients/${encodeURIComponent(publicKey)}/expiry`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ expiry_date: expiryDate })
+                    });
+                    
+                    if (response.ok) {
+                        this.success = 'Expiry date updated successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        
+                        // Обновляем данные
+                        const limitsResponse = await fetch('/api/limits', {
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            }
+                        });
+                        
+                        if (limitsResponse.ok) {
+                            const limits = await limitsResponse.json();
+                            const limitsMap = {};
+                            limits.forEach(l => {
+                                limitsMap[l.public_key] = l;
+                            });
+                            
+                            // Сохраняем текущие значения трафика
+                            const currentTraffic = {};
+                            this.clients.forEach(c => {
+                                currentTraffic[c.public_key] = {
+                                    traffic: c.traffic,
+                                    handshake: c.handshake
+                                };
+                            });
+                            
+                            this.clients = this.clients.map(client => ({
+                                ...client,
+                                limit: limitsMap[client.public_key]?.limit,
+                                used: limitsMap[client.public_key]?.used || 0,
+                                expiry_date: limitsMap[client.public_key]?.expiry_date,
+                                is_active: limitsMap[client.public_key]?.is_active !== false,
+                                traffic: currentTraffic[client.public_key]?.traffic || client.traffic,
+                                handshake: currentTraffic[client.public_key]?.handshake || client.handshake
+                            }));
+                        }
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to set expiry date';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to set expiry date';
+                    console.error(err);
+                }
+            },
 
             // ========== USERS METHODS ==========
             async fetchUsers() {
