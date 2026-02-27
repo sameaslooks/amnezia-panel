@@ -3,6 +3,7 @@ import subprocess
 import json
 import asyncssh # type: ignore
 import os
+import uuid
 from typing import Optional, Dict, List, Union
 
 class AWGManager:
@@ -48,23 +49,44 @@ class AWGManager:
             try:
                 await self._connect_ssh()
                 
-                # Экранируем команду
-                escaped_command = command.replace('"', '\\"').replace("'", "\\'")
-                
-                # Формируем команду с sudo если нужно
-                if hasattr(self, 'sudo_password'):
-                    # Используем sudo с паролем
-                    docker_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
-                    full_cmd = f"echo '{self.sudo_password}' | sudo -S bash -c \"{docker_cmd}\""
-                else:
-                    full_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
-                
-                result = await self.ssh_connection.run(full_cmd)
-                
-                if result.returncode != 0:
-                    return ""
+                # Для команд с echo используем временный файл
+                if "echo" in command and "|" in command:
+                    import uuid
+                    temp_script = f"/tmp/cmd_{uuid.uuid4().hex}.sh"
                     
-                return result.stdout
+                    # Записываем команду во временный скрипт
+                    script_content = f"""#!/bin/bash
+{command}
+"""
+                    write_cmd = f"cat > {temp_script} << 'SCRIPTEOF'\n{script_content}\nSCRIPTEOF"
+                    await self.ssh_connection.run(write_cmd)
+                    await self.ssh_connection.run(f"chmod +x {temp_script}")
+                    
+                    # Выполняем скрипт в контейнере
+                    docker_cmd = f"docker exec {self.container_name} {temp_script}"
+                    if hasattr(self, 'sudo_password'):
+                        full_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
+                    else:
+                        full_cmd = docker_cmd
+                    
+                    result = await self.ssh_connection.run(full_cmd)
+                    
+                    # Удаляем скрипт
+                    await self.ssh_connection.run(f"rm -f {temp_script}")
+                    
+                    return result.stdout
+                else:
+                    # Простая команда
+                    escaped_command = command.replace('"', '\\"').replace("'", "\\'")
+                    docker_cmd = f"docker exec {self.container_name} bash -c \"{escaped_command}\""
+                    
+                    if hasattr(self, 'sudo_password'):
+                        full_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
+                    else:
+                        full_cmd = docker_cmd
+                    
+                    result = await self.ssh_connection.run(full_cmd)
+                    return result.stdout
                 
             except Exception as e:
                 print(f"SSH execution error: {e}")
@@ -130,6 +152,7 @@ class AWGManager:
                           for item in clients_data if "clientId" in item}
         except:
             client_names = {}
+            clients_data = []
         
         config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
         clients = []
@@ -141,6 +164,7 @@ class AWGManager:
             
             if key_match:
                 pub_key = key_match.group(1)
+                # Берём имя из clientsTable если есть, иначе генерируем
                 name = client_names.get(pub_key, f"Client {i}")
                 
                 clients.append({
@@ -203,21 +227,56 @@ class AWGManager:
     
     def _get_server_ip(self) -> str:
         """Получает внешний IP сервера"""
-        try:
-            result = subprocess.run(['curl', '-s', 'ifconfig.me'], 
-                                  capture_output=True, timeout=5)
-            return result.stdout.decode().strip()
-        except:
-            return "YOUR_SERVER_IP"
+        if self.connection_type == 'remote' and self.host:
+            # Если host - домен, резолвим его в IP
+            if not self.host.replace('.', '').isdigit():  # не похоже на IP
+                try:
+                    import socket
+                    ip = socket.gethostbyname(self.host)
+                    print(f"Resolved {self.host} -> {ip}")
+                    return ip
+                except:
+                    print(f"Failed to resolve {self.host}, using as is")
+                    return self.host
+            return self.host
+        else:
+            # Для локального - определяем внешний IP
+            try:
+                result = subprocess.run(['curl', '-s', 'ifconfig.me'], 
+                                      capture_output=True, timeout=5)
+                return result.stdout.decode().strip()
+            except:
+                return "YOUR_SERVER_IP"
     
     async def add_client(self, name: str) -> Dict:
         """Добавляет нового клиента"""
         # Генерируем ключи
         private_key = (await self._exec_in_container("awg genkey")).strip()
-        public_key = (await self._exec_in_container(f"echo '{private_key}' | awg pubkey")).strip()
+        
+        # Для remote режима используем временный файл
+        if self.connection_type == 'remote':
+            # Создаём временный файл с ключом
+            temp_file = f"/tmp/privkey_{uuid.uuid4().hex}"
+            await self._write_file_in_container(temp_file, private_key)
+            
+            # Читаем ключ и генерируем публичный
+            public_key = (await self._exec_in_container(f"cat {temp_file} | awg pubkey")).strip()
+            
+            # Удаляем временный файл
+            await self._exec_in_container(f"rm -f {temp_file}")
+        else:
+            public_key = (await self._exec_in_container(f"echo '{private_key}' | awg pubkey")).strip()
+        
+        if not public_key:
+            # Отладка
+            print(f"Private key length: {len(private_key)}")
+            print(f"Private key: {private_key}")
+            raise Exception(f"Failed to generate public key from private key")
         
         # Генерируем Pre-shared ключ для этого пира
         psk = (await self._exec_in_container("wg genpsk")).strip()
+        
+        # ... остальной код ...
         
         # Получаем текущий конфиг
         config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
@@ -227,11 +286,11 @@ class AWGManager:
         
         # Добавляем секцию пира в конфиг (с PSK)
         peer_section = f"""
-    [Peer]
-    PublicKey = {public_key}
-    PresharedKey = {psk}
-    AllowedIPs = {next_ip}
-    """
+[Peer]
+PublicKey = {public_key}
+PresharedKey = {psk}
+AllowedIPs = {next_ip}
+"""
         new_config = config.rstrip() + "\n" + peer_section
         
         # Записываем новый конфиг в файл
@@ -274,7 +333,7 @@ class AWGManager:
         create_client(public_key, name, next_ip, private_key, self.server_id or 1)
         
         # Save client config file
-        safe_path = f"/opt/amnezia/awg/client_configs"
+        safe_path = f"/opt/amnezia/client_configs"
         await self._write_file_in_container(
             f"{safe_path}/{public_key}.conf",
             client_config
@@ -357,22 +416,50 @@ class AWGManager:
 
     async def get_client_config(self, public_key: str) -> str:
         """Генерирует конфиг для клиента по его публичному ключу"""
+        print(f"Getting config for public_key: {public_key}")  # отладка
+        
         config = await self._exec_in_container("cat /opt/amnezia/awg/awg0.conf")
+        if not config:
+            print("Config file is empty or not found")
+            return ""
         
         # Ищем приватный ключ сервера
         priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
         if not priv_match:
+            print("Server private key not found in config")
             return ""
         
         server_private = priv_match.group(1)
-        server_public = (await self._exec_in_container(f"echo '{server_private}' | awg pubkey")).strip()
+        print(f"Server private key found")  # отладка
+        
+            # Получаем публичный ключ сервера
+        if self.connection_type == 'remote':
+            # Сначала пробуем прочитать из файла
+            print("Trying to read server_public.key from file...")
+            server_public = (await self._exec_in_container("cat /opt/amnezia/awg/server_public.key 2>/dev/null || true")).strip()
+            print(f"Read from file: '{server_public}'")
+            
+            # Если файла нет - генерируем
+            if not server_public:
+                print("File not found or empty, generating from private key...")
+                temp_file = f"/tmp/server_priv_{uuid.uuid4().hex}"
+                await self._write_file_in_container(temp_file, server_private)
+                server_public = (await self._exec_in_container(f"cat {temp_file} | awg pubkey")).strip()
+                await self._exec_in_container(f"rm -f {temp_file}")
+                print(f"Generated: '{server_public}'")
+        else:
+            server_public = (await self._exec_in_container(f"echo '{server_private}' | awg pubkey")).strip()
+        
+        print(f"Server public key: {server_public}")  # отладка
         
         # Ищем IP клиента
         peers = config.split('[Peer]')[1:]
         client_ip = None
         peer_text = None
         for peer in peers:
-            if public_key in peer:
+            # Ищем точное совпадение PublicKey
+            key_match = re.search(r'PublicKey\s*=\s*(\S+)', peer)
+            if key_match and key_match.group(1) == public_key:
                 peer_text = peer
                 ip_match = re.search(r'AllowedIPs\s*=\s*([\d\.]+/\d+)', peer)
                 if ip_match:
@@ -380,7 +467,11 @@ class AWGManager:
                 break
         
         if not client_ip:
+            print(f"Client IP not found for key: {public_key}")
+            print(f"Peers found: {len(peers)}")
             return ""
+        
+        print(f"Client IP: {client_ip}")  # отладка
         
         # Получаем приватный ключ из БД
         from database import get_client
@@ -664,12 +755,25 @@ class AWGManager:
         # Получаем порт из конфига
         port_match = re.search(r'ListenPort\s*=\s*(\d+)', config)
         server_port = port_match.group(1)
-        # Публичный ключ сервера из конфига
-        priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
+        # Публичный ключ сервера
         server_public = ""
-        if priv_match:
-            private_key = priv_match.group(1)
-            server_public = (await self._exec_in_container(f"echo '{private_key}' | awg pubkey")).strip()
+        if self.connection_type == 'remote':
+            # Для удалённого сервера читаем из файла
+            server_public = (await self._exec_in_container("cat /opt/amnezia/awg/server_public.key 2>/dev/null || true")).strip()
+        
+        # Если не получилось прочитать из файла - генерируем из приватного
+        if not server_public:
+            priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', config)
+            if priv_match:
+                private_key = priv_match.group(1)
+                if self.connection_type == 'remote':
+                    # Для remote используем временный файл
+                    temp_file = f"/tmp/server_priv_{uuid.uuid4().hex}"
+                    await self._write_file_in_container(temp_file, private_key)
+                    server_public = (await self._exec_in_container(f"cat {temp_file} | awg pubkey")).strip()
+                    await self._exec_in_container(f"rm -f {temp_file}")
+                else:
+                    server_public = (await self._exec_in_container(f"echo '{private_key}' | awg pubkey")).strip()
 
         def get(pattern, default=""):
             m = re.search(pattern, config)
@@ -1144,7 +1248,6 @@ docker exec amnezia-awg2 sh -c '
 PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key)
 cat > /opt/amnezia/awg/awg0.conf << EOF
 [Interface]
-Address = 10.8.1.1/24
 ListenPort = 32308
 PrivateKey = $PRIVATE_KEY
 Jc = 4
@@ -1158,6 +1261,7 @@ H1 = 1144016577-1678296790
 H2 = 2067003202-2073469039
 H3 = 2118455839-2136843295
 H4 = 2142407594-2142521231
+# I1 = <b 0x084481800001000300000000077469636b65747306776964676574096b696e6f706f69736b0272750000010001c00c0005000100000039001806776964676574077469636b6574730679616e646578c025c0390005000100000039002b1765787465726e616c2d7469636b6574732d776964676574066166697368610679616e646578036e657400c05d000100010000001c000457fafe25>
 EOF
 echo "Server config created"
 '

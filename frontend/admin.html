@@ -569,7 +569,7 @@
             currentUser: '',
             amneziaLink: '',
             currentSetupServerId: null,
-            activeTab: 'servers',
+            activeTab: 'clients',
             selectedServerId: 1,
 
             newUser: { username: '', password: '', role: 'user' },
@@ -746,25 +746,93 @@
                 }
             },
             
-            async showConfig(client) {
+async fetchTraffic() {
                 try {
-                    let config = client.config;
+                    const response = await fetch('/api/traffic', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
                     
-                    // Если нет конфига в клиенте - запрашиваем
-                    if (!config) {
-                        const response = await fetch(`/api/user-config?public_key=${encodeURIComponent(client.public_key)}`, {
+                    if (response.ok) {
+                        const trafficData = await response.json();
+                        this.traffic = trafficData;
+                        
+                        // Получаем свежие лимиты и статусы
+                        const limitsResponse = await fetch('/api/limits', {
                             headers: {
                                 'Authorization': `Bearer ${localStorage.getItem('token')}`
                             }
                         });
                         
+                        if (limitsResponse.ok) {
+                            const limits = await limitsResponse.json();
+                            const limitsMap = {};
+                            limits.forEach(l => {
+                                limitsMap[l.public_key] = l;
+                            });
+                            
+                            const trafficMap = {};
+                            trafficData.forEach(t => {
+                                trafficMap[t.public_key] = t;
+                            });
+                            
+                            this.clients = this.clients.map(client => {
+                                const t = trafficMap[client.public_key];
+                                const limitData = limitsMap[client.public_key];
+                                
+                                return {
+                                    ...client,
+                                    traffic: t?.transfer || '0 B',
+                                    handshake: t?.latest_handshake || 'Never',
+                                    used: limitData?.used || client.used,
+                                    is_active: limitData?.is_active !== false
+                                };
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch traffic');
+                }
+            },
+
+            async showConfig(client) {
+                try {
+                    let config = client.config;
+                    
+                    if (!config) {
+                        const url = client.server_id 
+                            ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
+                            : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
+                        
+                        console.log('Fetching from:', url);
+                        
+                        const response = await fetch(url, {
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            }
+                        });
+                        
+                        console.log('Response status:', response.status);
+                        
                         if (response.ok) {
                             const data = await response.json();
+                            console.log('Response data:', data); // Что пришло
                             config = data.config;
                         } else {
+                            const error = await response.text();
+                            console.error('Error response:', error);
                             this.error = 'Failed to get config';
                             return;
                         }
+                    }
+                    
+                    console.log('Final config:', config); // Итоговый конфиг
+                    console.log('Config length:', config?.length);
+                    
+                    if (!config) {
+                        this.error = 'Config is empty';
+                        return;
                     }
                     
                     this.selectedConfig = config;
@@ -774,17 +842,17 @@
                     // Ждем рендера модалки
                     await this.$nextTick();
                     
-                    // Генерируем QR
+                    // Генерируем QR только если есть конфиг
                     setTimeout(() => {
                         const qrContainer = document.getElementById('qrcode');
-                        if (qrContainer) {
+                        if (qrContainer && config) {
                             qrContainer.innerHTML = '';
                             QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
                         }
                     }, 50);
                     
-                    // Запрашиваем Amnezia VPN ссылку
-                    const linkResponse = await fetch(`/api/generate-link?public_key=${encodeURIComponent(client.public_key)}`, {
+                    // Запрашиваем Amnezia VPN ссылку с server_id
+                    const linkResponse = await fetch(`/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`, {
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('token')}`
                         }
@@ -796,6 +864,7 @@
                     }
                     
                 } catch (err) {
+                    console.error('Error in showConfig:', err);
                     this.error = 'Failed to get config';
                 }
             },

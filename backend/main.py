@@ -186,7 +186,12 @@ async def get_user_config(public_key: str, request: Request, server_id: Optional
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    awg = AWGManager(server_id=server_id or 1)
+    # Если server_id не передан, используем сервер из запроса или 1
+    if not server_id:
+        # Попробуем получить server_id из query params
+        server_id = request.query_params.get("server_id")
+    
+    awg = AWGManager(server_id=int(server_id) if server_id else 1)
     config = await awg.get_client_config(public_key)
     if not config:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -437,7 +442,9 @@ async def generate_vpn_link(public_key: str, request: Request, server_id: Option
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     
-    awg = AWGManager(server_id=server_id or 1)
+    server_id = server_id or client.get('server_id', 1)
+    
+    awg = AWGManager(server_id=server_id)
     link = await awg.generate_amnezia_vpn_link(
         client_ip=client["ip"],
         client_private_key=client["private_key"],
