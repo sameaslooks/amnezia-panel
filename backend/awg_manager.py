@@ -1102,3 +1102,19 @@ AllowedIPs = {next_ip}
             status["errors"].append(str(e))
         
         return status
+    
+    async def check_all_limits_periodically(self):
+        """Периодическая проверка всех лимитов на сервере"""
+        from database import check_all_limits
+        try:
+            deactivated = check_all_limits(self)
+            
+            if deactivated['total_deactivated'] > 0:
+                print(f"Deactivated {deactivated['total_deactivated']} clients on server {self.server_id}")
+                print(f"  - Traffic limit exceeded: {len(deactivated['traffic_limit_deactivated'])}")
+                print(f"  - Expiry date reached: {len(deactivated['expiry_date_deactivated'])}")
+            
+            return deactivated
+        except Exception as e:
+            print(f"Error checking limits on server {self.server_id}: {e}")
+            return {"error": str(e)}
