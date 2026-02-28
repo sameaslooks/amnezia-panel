@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amnezia Panel - Admin</title>
-	<link href="/static/tailwind.min.css" rel="stylesheet">
+    <link href="/static/tailwind.min.css" rel="stylesheet">
     <script src="/static/alpine.min.js" defer></script>
     <script src="/static/qrcode.min.js"></script>
 </head>
@@ -16,23 +16,23 @@
                 <div class="flex justify-between items-center h-16">
                     <div class="flex items-center space-x-4">
                         <h1 class="text-xl font-bold">Amnezia VPN Admin</h1>
-                            <div class="flex space-x-2">
-                                <button @click="activeTab = 'servers'"
-                                        :class="activeTab === 'servers' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
-                                        class="px-4 py-2 rounded-md text-sm font-medium transition">
-                                    Servers
-                                </button>
-                                <button @click="activeTab = 'clients'"
-                                        :class="activeTab === 'clients' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
-                                        class="px-4 py-2 rounded-md text-sm font-medium transition">
-                                    VPN Clients
-                                </button>
-                                <button @click="activeTab = 'users'"
-                                        :class="activeTab === 'users' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
-                                        class="px-4 py-2 rounded-md text-sm font-medium transition">
-                                    Users
-                                </button>
-                            </div>
+                        <div class="flex space-x-2">
+                            <button @click="activeTab = 'servers'"
+                                    :class="activeTab === 'servers' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                    class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                Servers
+                            </button>
+                            <button @click="activeTab = 'clients'"
+                                    :class="activeTab === 'clients' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                    class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                VPN Clients
+                            </button>
+                            <button @click="activeTab = 'users'"
+                                    :class="activeTab === 'users' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                    class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                Users
+                            </button>
+                        </div>
                     </div>
                     <button @click="logout" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
                         Logout
@@ -47,7 +47,6 @@
             <div x-show="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
                 <span x-text="error"></span>
             </div>
-
             <!-- Success Message -->
             <div x-show="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
                 <span x-text="success"></span>
@@ -63,16 +62,13 @@
                             <input type="text" x-model="newServer.name"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                 placeholder="Server name (e.g. 'Frankfurt')" required>
-                            
                             <input type="text" x-model="newServer.host"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                 placeholder="Host (IP or domain)">
-                            
                             <input type="text" x-model="newServer.username"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                 placeholder="Username (for SSH)">
                         </div>
-                        
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <select x-model="newServer.auth_type" 
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
@@ -81,23 +77,19 @@
                                 <option value="key">Key auth</option>
                                 <option value="key+sudo">Key + sudo password</option>
                             </select>
-                            
                             <input type="password" x-model="newServer.password"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                 placeholder="Password (if needed)">
-                            
                             <input type="text" x-model="newServer.port"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                 placeholder="SSH port (default 22)">
                         </div>
-                        
                         <div class="mb-4" x-show="newServer.auth_type.includes('key')">
                             <textarea x-model="newServer.private_key"
                                     class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500 font-mono text-sm"
                                     rows="4"
                                     placeholder="Paste private key here (including BEGIN and END lines)"></textarea>
                         </div>
-                        
                         <button type="submit" 
                                 class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
                                 :disabled="addingServer">
@@ -170,14 +162,13 @@
                     </div>
                 </div>
 
-                <!-- Setup Log Modal (для real-time логов) -->
+                <!-- Setup Log Modal -->
                 <div x-show="showSetupModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="text-lg font-bold">Server Setup Log</h3>
                             <button @click="closeSetupModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                         </div>
-                        
                         <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-sm h-96 overflow-y-auto">
                             <template x-for="(log, index) in setupLogs" :key="index">
                                 <div :class="{
@@ -194,7 +185,6 @@
                                 </div>
                             </template>
                         </div>
-                        
                         <div class="flex justify-end mt-4">
                             <button @click="closeSetupModal" 
                                     class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
@@ -218,7 +208,6 @@
                                     class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                     placeholder="e.g. 'iPhone 15'" required>
                             </div>
-                            
                             <div class="w-48">
                                 <label class="block text-sm text-gray-600 mb-1">Server</label>
                                 <select x-model="selectedServerId" 
@@ -228,7 +217,6 @@
                                     </template>
                                 </select>
                             </div>
-                            
                             <button type="submit" 
                                     class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 h-[42px]"
                                     :disabled="adding">
@@ -241,130 +229,130 @@
 
                 <!-- Clients Table -->
                 <div class="bg-white rounded-lg shadow-md p-6">
-				<div class="overflow-x-auto">
-					<table class="w-full">
-						<thead>
-							<tr class="bg-gray-50">
-                                <th class="px-4 py-2 text-left">Server</th>
-								<th class="px-4 py-2 text-left">Name</th>
-								<th class="px-4 py-2 text-left">IP</th>
-								<th class="px-4 py-2 text-left">Public Key</th>
-								<th class="px-4 py-2 text-left">Traffic</th>
-								<th class="px-4 py-2 text-left">Limit</th>
-								<th class="px-4 py-2 text-left">Used</th>
-                                <th class="px-4 py-2 text-left">Expiry Date</th>
-								<th class="px-4 py-2 text-left">Status</th>
-								<th class="px-4 py-2 text-left">Last Handshake</th>
-								<th class="px-4 py-2 text-left">Actions</th>
-							</tr>
-						</thead>
-						<tbody>
-							<template x-for="client in clients" :key="client.public_key">
-								<tr class="border-t" :class="{'bg-red-50': !client.is_active}">
-                                    <td class="px-4 py-2">
-                                        <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" 
-                                            x-text="client.server_name || 'local'"></span>
-                                    </td>
-									<td class="px-4 py-2" x-text="client.name"></td>
-									<td class="px-4 py-2" x-text="client.ip"></td>
-									<td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
-									<td class="px-4 py-2" x-text="client.traffic || 'N/A'"></td>
-									
-									<!-- Limit column -->
-									<td class="px-4 py-2">
-										<div x-data="{ editing: false, newLimit: client.limit ? client.limit/1024/1024 : 0, unit: 'MB' }">
-											<template x-if="!editing">
-												<div>
-													<span x-text="client.limit ? formatBytes(client.limit) : 'No limit'"></span>
-													<button @click="editing = true; newLimit = client.limit ? client.limit/1024/1024 : 0" 
-															class="ml-2 text-blue-500 text-xs hover:text-blue-700">✎</button>
-												</div>
-											</template>
-											<template x-if="editing">
-												<div class="flex items-center gap-1">
-													<input type="number" x-model="newLimit" 
-														   class="w-20 px-1 py-0.5 border rounded text-sm"
-														   min="0" step="0.1">
-													<select x-model="unit" class="text-sm border rounded px-1 py-0.5">
-														<option value="MB">MB</option>
-														<option value="GB">GB</option>
-														<option value="TB">TB</option>
-													</select>
-													<button @click="setLimitWithUnit(client.public_key, newLimit, unit); editing = false" 
-															class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
-													<button @click="editing = false" 
-															class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
-												</div>
-											</template>
-										</div>
-									</td>
-									
-									<!-- Used column -->
-									<td class="px-4 py-2">
-										<span x-text="formatBytes(client.used)"></span>
-										<span x-show="client.limit" class="text-xs text-gray-500">
-											(<span x-text="((client.used/client.limit)*100).toFixed(1)"></span>%)
-										</span>
-									</td>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Server</th>
+                                    <th class="px-4 py-2 text-left">Name</th>
+                                    <th class="px-4 py-2 text-left">IP</th>
+                                    <th class="px-4 py-2 text-left">Public Key</th>
+                                    <th class="px-4 py-2 text-left">Traffic</th>
+                                    <th class="px-4 py-2 text-left">Limit</th>
+                                    <th class="px-4 py-2 text-left">Used</th>
+                                    <th class="px-4 py-2 text-left">Expiry Date</th>
+                                    <th class="px-4 py-2 text-left">Status</th>
+                                    <th class="px-4 py-2 text-left">Last Handshake</th>
+                                    <th class="px-4 py-2 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="client in clients" :key="client.public_key">
+                                    <tr class="border-t" :class="{'bg-red-50': !client.is_active}">
+                                        <td class="px-4 py-2">
+                                            <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" 
+                                                x-text="client.server_name || 'local'"></span>
+                                        </td>
+                                        <td class="px-4 py-2" x-text="client.name"></td>
+                                        <td class="px-4 py-2" x-text="client.ip"></td>
+                                        <td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
+                                        <td class="px-4 py-2" x-text="client.traffic || 'N/A'"></td>
+                                        
+                                        <!-- Limit column -->
+                                        <td class="px-4 py-2">
+                                            <div x-data="{ editing: false, newLimit: client.limit ? client.limit/1024/1024 : 0, unit: 'MB' }">
+                                                <template x-if="!editing">
+                                                    <div>
+                                                        <span x-text="client.limit ? formatBytes(client.limit) : 'No limit'"></span>
+                                                        <button @click="editing = true; newLimit = client.limit ? client.limit/1024/1024 : 0" 
+                                                                class="ml-2 text-blue-500 text-xs hover:text-blue-700">✎</button>
+                                                    </div>
+                                                </template>
+                                                <template x-if="editing">
+                                                    <div class="flex items-center gap-1">
+                                                        <input type="number" x-model="newLimit" 
+                                                               class="w-20 px-1 py-0.5 border rounded text-sm"
+                                                               min="0" step="0.1">
+                                                        <select x-model="unit" class="text-sm border rounded px-1 py-0.5">
+                                                            <option value="MB">MB</option>
+                                                            <option value="GB">GB</option>
+                                                            <option value="TB">TB</option>
+                                                        </select>
+                                                        <button @click="setLimitWithUnit(client.public_key, newLimit, unit); editing = false" 
+                                                                class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
+                                                        <button @click="editing = false" 
+                                                                class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </td>
+                                        
+                                        <!-- Used column -->
+                                        <td class="px-4 py-2">
+                                            <span x-text="formatBytes(client.used)"></span>
+                                            <span x-show="client.limit" class="text-xs text-gray-500">
+                                                (<span x-text="((client.used/client.limit)*100).toFixed(1)"></span>%)
+                                            </span>
+                                        </td>
 
-                                    <!-- Expiry Date column -->
-                                    <td class="px-4 py-2">
-                                        <div x-data="{ editing: false, newDate: client.expiry_date || '', dateInput: '' }">
-                                            <template x-if="!editing">
-                                                <div class="flex items-center">
-                                                    <span x-text="client.expiry_date || 'No expiry'" class="text-sm"></span>
-                                                    <button @click="editing = true; dateInput = client.expiry_date ? client.expiry_date.replace(' ', 'T').substring(0,16) : ''" 
-                                                            class="ml-2 text-blue-500 text-xs hover:text-blue-700" title="Edit expiry date">
-                                                        ✎
-                                                    </button>
-                                                    <button x-show="client.expiry_date" 
-                                                            @click="setExpiry(client.public_key, null)" 
-                                                            class="ml-1 text-red-500 text-xs hover:text-red-700" title="Remove expiry date">
-                                                        ✕
-                                                    </button>
-                                                </div>
-                                            </template>
-                                            <template x-if="editing">
-                                                <div class="flex items-center gap-1">
-                                                    <input type="datetime-local" 
-                                                        x-model="dateInput" 
-                                                        class="px-1 py-0.5 border rounded text-sm"
-                                                        :min="new Date().toISOString().slice(0,16)">
-                                                    <button @click="setExpiry(client.public_key, dateInput.replace('T', ' ') + ':00'); editing = false" 
-                                                            class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
-                                                    <button @click="editing = false" 
-                                                            class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </td>
-									
-									<!-- Status column -->
-									<td class="px-4 py-2">
-										<span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
-										<span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
-									</td>
-									
-									<!-- Last Handshake -->
-									<td class="px-4 py-2" x-text="client.handshake || 'Never'"></td>
-									
-									<!-- Actions -->
-									<td class="px-4 py-2">
-										<button @click="showConfig(client)" 
-												class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 mr-2">
-											Config
-										</button>
-										<button @click="deleteClient(client.public_key, client.name)" 
-												class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
-											Delete
-										</button>
-									</td>
-								</tr>
-							</template>
-						</tbody>
-					</table>
-				</div>
-            </div>
+                                        <!-- Expiry Date column -->
+                                        <td class="px-4 py-2">
+                                            <div x-data="{ editing: false, newDate: client.expiry_date || '', dateInput: '' }">
+                                                <template x-if="!editing">
+                                                    <div class="flex items-center">
+                                                        <span x-text="client.expiry_date || 'No expiry'" class="text-sm"></span>
+                                                        <button @click="editing = true; dateInput = client.expiry_date ? client.expiry_date.replace(' ', 'T').substring(0,16) : ''" 
+                                                                class="ml-2 text-blue-500 text-xs hover:text-blue-700" title="Edit expiry date">
+                                                            ✎
+                                                        </button>
+                                                        <button x-show="client.expiry_date" 
+                                                                @click="setExpiry(client.public_key, null)" 
+                                                                class="ml-1 text-red-500 text-xs hover:text-red-700" title="Remove expiry date">
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                                <template x-if="editing">
+                                                    <div class="flex items-center gap-1">
+                                                        <input type="datetime-local" 
+                                                            x-model="dateInput" 
+                                                            class="px-1 py-0.5 border rounded text-sm"
+                                                            :min="new Date().toISOString().slice(0,16)">
+                                                        <button @click="setExpiry(client.public_key, dateInput.replace('T', ' ') + ':00'); editing = false" 
+                                                                class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
+                                                        <button @click="editing = false" 
+                                                                class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </td>
+                                        
+                                        <!-- Status column -->
+                                        <td class="px-4 py-2">
+                                            <span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
+                                            <span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
+                                        </td>
+                                        
+                                        <!-- Last Handshake -->
+                                        <td class="px-4 py-2" x-text="client.handshake || 'Never'"></td>
+                                        
+                                        <!-- Actions -->
+                                        <td class="px-4 py-2">
+                                            <button @click="showConfig(client)" 
+                                                    class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 mr-2">
+                                                Config
+                                            </button>
+                                            <button @click="deleteClient(client.public_key, client.name)" 
+                                                    class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <!-- USERS TAB -->
@@ -437,23 +425,18 @@
             </div>
         </div>
 
-        <!-- Overlay -->
+        <!-- Overlay (Config + QR) -->
         <div x-show="showConfigModal"
             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
             @click.self="showConfigModal = false">
-
-            <!-- Центрируем flex-контейнер -->
             <div class="flex gap-6 justify-center items-start max-w-[90vw] w-full">
-
-                <!-- 1. Конфиг -->
+                <!-- Config -->
                 <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
                         <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                     </div>
-
                     <pre class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap break-words" x-text="selectedConfig"></pre>
-
                     <div class="flex justify-end mt-4">
                         <button @click="downloadConfig"
                                 class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
@@ -461,8 +444,7 @@
                         </button>
                     </div>
                 </div>
-
-                <!-- 2. QR -->
+                <!-- QR -->
                 <div class="bg-white rounded-lg p-5 shadow-2xl flex-shrink-0
                             w-[clamp(220px,18vw,280px)] flex flex-col items-center">
                     <div class="flex justify-between items-center w-full mb-3">
@@ -470,13 +452,11 @@
                         <button @click="showConfigModal = false"
                                 class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
                     </div>
-
                     <canvas id="qrcode"
                             class="bg-white p-2 rounded shadow"
                             :width="qrSize"
                             :height="qrSize"></canvas>
-                    
-                    <!-- Amnezia VPN Link - ПЕРЕНЕСТИ СЮДА, ДО "Scan to import" -->
+                    <!-- Amnezia VPN Link -->
                     <div class="w-full mt-3" x-show="amneziaLink">
                         <div class="text-xs text-gray-600 mb-1">Amnezia VPN Link:</div>
                         <div class="flex gap-1">
@@ -491,7 +471,6 @@
                             </button>
                         </div>
                     </div>
-                    
                     <div class="text-xs text-gray-600 mt-2 text-center">
                         Scan to import
                     </div>
@@ -507,7 +486,6 @@
                     <h3 class="text-lg font-bold">Edit User</h3>
                     <button @click="showEditModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
-
                 <form @submit.prevent="saveUser">
                     <div class="space-y-4">
                         <div>
@@ -516,14 +494,12 @@
                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                    placeholder="Username">
                         </div>
-
                         <div>
                             <label class="block text-sm font-medium mb-1">Password (leave empty to keep current)</label>
                             <input type="password" x-model="editingUser.password"
                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                    placeholder="New password">
                         </div>
-
                         <div>
                             <label class="block text-sm font-medium mb-1">Role</label>
                             <select x-model="editingUser.role" 
@@ -532,7 +508,6 @@
                                 <option value="admin">Admin</option>
                             </select>
                         </div>
-
                         <div class="flex gap-2 justify-end">
                             <button type="button" @click="showEditModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
@@ -554,6 +529,7 @@
     <script>
     function adminPanel() {
         return {
+            // State
             servers: [],
             clients: [],
             traffic: [],
@@ -575,99 +551,58 @@
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
             newServer: {
-                name: '',
-                host: '',
-                port: 22,
-                username: '',
-                auth_type: 'password',
-                password: '',
-                private_key: ''
+                name: '', host: '', port: 22, username: '',
+                auth_type: 'password', password: '', private_key: ''
             },
             showEditModal: false,
             addingUser: false,
             savingUser: false,
             addingServer: false,
             showSetupModal: false,
-            qrSize: 400,  // QR code size in pixels (change here to adjust)
-            
+            qrSize: 400,
+
+            // Helper
+            getToken() {
+                return localStorage.getItem('token');
+            },
+
             async init() {
-                const token = localStorage.getItem('token');
+                const token = this.getToken();
                 const role = localStorage.getItem('role');
                 const username = localStorage.getItem('username');
-                
                 if (!token || role !== 'admin') {
                     window.location.href = '/login';
                     return;
                 }
-                
                 this.currentUser = username;
-                await this.fetchServers();  // Сначала загружаем серверы
-                
+                await this.fetchServers();           // сначала серверы
                 if (this.servers.length > 0) {
-                    this.selectedServerId = this.servers[0].id;  // Выбираем первый сервер
+                    this.selectedServerId = this.servers[0].id;
                 }
-                
-                await this.fetchAllData();
-                this.fetchTraffic();
-                
-                setInterval(() => {
-                    this.fetchTraffic();
-                }, 5000);
-                
+                await this.loadAllData();            // клиенты, лимиты, пользователи
+                this.fetchTraffic();                  // трафик
+                setInterval(() => this.fetchTraffic(), 5000);
                 setInterval(() => {
                     this.servers.forEach(server => this.fetchServerStatus(server.id));
                 }, 30000);
             },
-            
-            async fetchAllData() {
+
+            // Единая загрузка всех основных данных (кроме трафика)
+            async loadAllData() {
                 try {
-                    const token = localStorage.getItem('token');
-                    
-                    const [clientsRes, limitsRes, usersRes] = await Promise.all([
-                        fetch('/api/clients', { headers: { 'Authorization': `Bearer ${token}` } }),
-                        fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } }),
-                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }),
-                    ]);
-                    
-                    if (clientsRes.ok && limitsRes.ok && usersRes.ok) {
-                        const clientsData = await clientsRes.json();
-                        const limits = await limitsRes.json();
-                        const users = await usersRes.json();
-                        
-                        const limitsMap = {};
-                        limits.forEach(l => limitsMap[l.public_key] = l);
-                        
-                        this.clients = clientsData.map(client => ({
-                            ...client,
-                            limit: limitsMap[client.public_key]?.limit,
-                            used: limitsMap[client.public_key]?.used || 0,
-                            is_active: limitsMap[client.public_key]?.is_active !== false
-                        }));
-                        
-                        this.users = users;
+                    const token = this.getToken();
+                    if (this.servers.length === 0) {
+                        await this.fetchServers();
                     }
-                } catch (err) {
-                    this.error = 'Failed to load data';
-                }
-            },
-            
-            async fetchAllData() {
-                try {
-                    const token = localStorage.getItem('token');
-                    
-                    // Получаем список серверов сначала
-                    await this.fetchServers();
-                    
-                    // Затем получаем клиентов с каждого сервера
+
+                    // Собираем клиентов со всех серверов
                     const allClients = [];
                     for (const server of this.servers) {
-                        const clientsRes = await fetch(`/api/clients?server_id=${server.id}`, { 
-                            headers: { 'Authorization': `Bearer ${token}` } 
+                        const clientsRes = await fetch(`/api/clients?server_id=${server.id}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
                         });
-                        
                         if (clientsRes.ok) {
                             const serverClients = await clientsRes.json();
-                            // Добавляем информацию о сервере к каждому клиенту
                             serverClients.forEach(c => {
                                 c.server_id = server.id;
                                 c.server_name = server.name;
@@ -675,65 +610,95 @@
                             allClients.push(...serverClients);
                         }
                     }
-                    
+
                     const [limitsRes, usersRes] = await Promise.all([
                         fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } }),
-                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } })
                     ]);
-                    
+
                     if (limitsRes.ok && usersRes.ok) {
                         const limits = await limitsRes.json();
                         const users = await usersRes.json();
-                        
                         const limitsMap = {};
                         limits.forEach(l => limitsMap[l.public_key] = l);
-                        
-                        this.clients = allClients.map(client => ({
-                            ...client,
-                            limit: limitsMap[client.public_key]?.limit,
-                            used: limitsMap[client.public_key]?.used || 0,
-                            is_active: limitsMap[client.public_key]?.is_active !== false
-                        }));
-                        
+
+                        this.clients = allClients.map(client => {
+                            const limitData = limitsMap[client.public_key];
+                            return {
+                                ...client,
+                                limit: limitData?.limit,
+                                used: limitData?.used || 0,
+                                expiry_date: limitData?.expiry_date,
+                                is_active: limitData ? limitData.is_active === 1 : true  // изменено
+                            };
+                        });
                         this.users = users;
                     }
                 } catch (err) {
+                    console.error('loadAllData error:', err);
                     this.error = 'Failed to load data';
                 }
             },
-            
+
+            async fetchTraffic() {
+                try {
+                    const token = this.getToken();
+                    const [trafficRes, limitsRes] = await Promise.all([
+                        fetch('/api/traffic', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } })
+                    ]);
+                    if (trafficRes.ok && limitsRes.ok) {
+                        const trafficData = await trafficRes.json();
+                        const limits = await limitsRes.json();
+                        const limitsMap = {};
+                        limits.forEach(l => limitsMap[l.public_key] = l);
+                        const trafficMap = {};
+                        trafficData.forEach(t => trafficMap[t.public_key] = t);
+
+                        this.clients = this.clients.map(client => {
+                            const t = trafficMap[client.public_key];
+                            const limitData = limitsMap[client.public_key];
+                            return {
+                                ...client,
+                                traffic: t?.transfer || '0 B',
+                                handshake: t?.latest_handshake || 'Never',
+                                used: limitData?.used || client.used,
+                                limit: limitData?.limit,
+                                expiry_date: limitData?.expiry_date,
+                                is_active: limitData ? limitData.is_active === 1 : true
+                            };
+                        });
+                    }
+                } catch (err) {
+                    console.error('fetchTraffic error:', err);
+                }
+            },
+
             async addClient() {
                 this.adding = true;
                 this.error = '';
                 this.success = '';
-                
                 try {
-                    // Добавляем server_id в запрос
-                    const url = this.selectedServerId && this.selectedServerId !== 1 
+                    const url = this.selectedServerId && this.selectedServerId !== 1
                         ? `/api/clients?server_id=${this.selectedServerId}`
                         : '/api/clients';
-                    
                     const response = await fetch(url, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ name: this.newClientName })
                     });
-                    
                     if (response.ok) {
                         const newClient = await response.json();
-                        // Добавляем информацию о сервере
                         const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
                         newClient.server_name = server?.name || 'local';
                         newClient.server_id = this.selectedServerId || 1;
-                        
                         this.clients.push(newClient);
                         this.newClientName = '';
                         this.success = 'Client added successfully';
                         setTimeout(() => this.success = '', 3000);
-                        
                         this.showConfig(newClient);
                     } else {
                         const error = await response.json();
@@ -745,104 +710,33 @@
                     this.adding = false;
                 }
             },
-            
-async fetchTraffic() {
-                try {
-                    const response = await fetch('/api/traffic', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        const trafficData = await response.json();
-                        this.traffic = trafficData;
-                        
-                        // Получаем свежие лимиты и статусы
-                        const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
-                        });
-                        
-                        if (limitsResponse.ok) {
-                            const limits = await limitsResponse.json();
-                            const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
-                            });
-                            
-                            const trafficMap = {};
-                            trafficData.forEach(t => {
-                                trafficMap[t.public_key] = t;
-                            });
-                            
-                            this.clients = this.clients.map(client => {
-                                const t = trafficMap[client.public_key];
-                                const limitData = limitsMap[client.public_key];
-                                
-                                return {
-                                    ...client,
-                                    traffic: t?.transfer || '0 B',
-                                    handshake: t?.latest_handshake || 'Never',
-                                    used: limitData?.used || client.used,
-                                    is_active: limitData?.is_active !== false
-                                };
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.error('Failed to fetch traffic');
-                }
-            },
 
             async showConfig(client) {
                 try {
                     let config = client.config;
-                    
                     if (!config) {
-                        const url = client.server_id 
+                        const url = client.server_id
                             ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
                             : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
-                        
-                        console.log('Fetching from:', url);
-                        
                         const response = await fetch(url, {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
                         });
-                        
-                        console.log('Response status:', response.status);
-                        
                         if (response.ok) {
                             const data = await response.json();
-                            console.log('Response data:', data); // Что пришло
                             config = data.config;
                         } else {
-                            const error = await response.text();
-                            console.error('Error response:', error);
                             this.error = 'Failed to get config';
                             return;
                         }
                     }
-                    
-                    console.log('Final config:', config); // Итоговый конфиг
-                    console.log('Config length:', config?.length);
-                    
                     if (!config) {
                         this.error = 'Config is empty';
                         return;
                     }
-                    
                     this.selectedConfig = config;
                     this.selectedClientName = client.name;
                     this.showConfigModal = true;
-                    
-                    // Ждем рендера модалки
                     await this.$nextTick();
-                    
-                    // Генерируем QR только если есть конфиг
                     setTimeout(() => {
                         const qrContainer = document.getElementById('qrcode');
                         if (qrContainer && config) {
@@ -850,25 +744,20 @@ async fetchTraffic() {
                             QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
                         }
                     }, 50);
-                    
-                    // Запрашиваем Amnezia VPN ссылку с server_id
-                    const linkResponse = await fetch(`/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`, {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
-                    
+                    const linkResponse = await fetch(
+                        `/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`,
+                        { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
+                    );
                     if (linkResponse.ok) {
                         const linkData = await linkResponse.json();
                         this.amneziaLink = linkData.link;
                     }
-                    
                 } catch (err) {
-                    console.error('Error in showConfig:', err);
+                    console.error('showConfig error:', err);
                     this.error = 'Failed to get config';
                 }
             },
-            
+
             downloadConfig() {
                 const blob = new Blob([this.selectedConfig], { type: 'text/plain' });
                 const url = window.URL.createObjectURL(blob);
@@ -880,18 +769,12 @@ async fetchTraffic() {
             },
 
             async deleteClient(publicKey, clientName) {
-                if (!confirm(`Are you sure you want to delete ${clientName}?`)) {
-                    return;
-                }
-                
+                if (!confirm(`Are you sure you want to delete ${clientName}?`)) return;
                 try {
                     const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
                         method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         this.clients = this.clients.filter(c => c.public_key !== publicKey);
                         this.success = 'Client deleted successfully';
@@ -907,123 +790,78 @@ async fetchTraffic() {
 
             async setLimit(publicKey, limitBytes) {
                 try {
-                    const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    const response = await fetch(
+                        `/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
                         }
-                    });
-                    
+                    );
                     if (response.ok) {
                         this.success = 'Limit updated successfully';
                         setTimeout(() => this.success = '', 3000);
-                        
-                        // Сохраняем текущие значения трафика
-                        const currentTraffic = {};
-                        this.clients.forEach(c => {
-                            currentTraffic[c.public_key] = {
-                                traffic: c.traffic,
-                                handshake: c.handshake
-                            };
-                        });
-                        
-                        // Обновляем данные
+                        // Обновляем лимиты через повторный запрос /api/limits
                         const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
                         });
-                        
                         if (limitsResponse.ok) {
                             const limits = await limitsResponse.json();
                             const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
+                            limits.forEach(l => limitsMap[l.public_key] = l);
+                            this.clients = this.clients.map(client => {
+                                const limitData = limitsMap[client.public_key];
+                                return {
+                                    ...client,
+                                    limit: limitData?.limit,
+                                    used: limitData?.used || 0,
+                                    expiry_date: limitData?.expiry_date,
+                                    is_active: limitData ? limitData.is_active === 1 : true
+                                };
                             });
-                            
-                            this.clients = this.clients.map(client => ({
-                                ...client,
-                                limit: limitsMap[client.public_key]?.limit,
-                                used: limitsMap[client.public_key]?.used || 0,
-                                is_active: limitsMap[client.public_key]?.is_active !== false,
-                                // Сохраняем трафик из currentTraffic
-                                traffic: currentTraffic[client.public_key]?.traffic || client.traffic,
-                                handshake: currentTraffic[client.public_key]?.handshake || client.handshake
-                            }));
                         }
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to set limit';
                     }
                 } catch (err) {
+                    console.error('setLimit error', err);
                     this.error = 'Failed to set limit';
                 }
             },
-            
-			formatBytes(bytes) {
-				if (!bytes || bytes === 0) return '0 B';
-				const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-				const k = 1024;
-				const i = Math.floor(Math.log(bytes) / Math.log(k));
-				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
-			},
 
-			setLimitWithUnit(publicKey, value, unit) {
-				let bytes = value;
-				switch(unit) {
-					case 'MB': bytes = value * 1024 * 1024; break;
-					case 'GB': bytes = value * 1024 * 1024 * 1024; break;
-					case 'TB': bytes = value * 1024 * 1024 * 1024 * 1024; break;
-					default: bytes = value * 1024 * 1024; // MB по умолчанию
-				}
-				this.setLimit(publicKey, Math.round(bytes));
-			},
+            formatBytes(bytes) {
+                if (!bytes || bytes === 0) return '0 B';
+                const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const k = 1024;
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
+            },
+
+            setLimitWithUnit(publicKey, value, unit) {
+                let bytes = value;
+                switch (unit) {
+                    case 'MB': bytes = value * 1024 * 1024; break;
+                    case 'GB': bytes = value * 1024 * 1024 * 1024; break;
+                    case 'TB': bytes = value * 1024 * 1024 * 1024 * 1024; break;
+                    default: bytes = value * 1024 * 1024;
+                }
+                this.setLimit(publicKey, Math.round(bytes));
+            },
 
             async setExpiry(publicKey, expiryDate) {
                 try {
-                    const response = await fetch(`/api/clients/${encodeURIComponent(publicKey)}/expiry`, {
+                    const response = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ expiry_date: expiryDate })
                     });
-                    
                     if (response.ok) {
                         this.success = 'Expiry date updated successfully';
                         setTimeout(() => this.success = '', 3000);
-                        
-                        // Обновляем данные
-                        const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
-                        });
-                        
-                        if (limitsResponse.ok) {
-                            const limits = await limitsResponse.json();
-                            const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
-                            });
-                            
-                            // Сохраняем текущие значения трафика
-                            const currentTraffic = {};
-                            this.clients.forEach(c => {
-                                currentTraffic[c.public_key] = {
-                                    traffic: c.traffic,
-                                    handshake: c.handshake
-                                };
-                            });
-                            
-                            this.clients = this.clients.map(client => ({
-                                ...client,
-                                limit: limitsMap[client.public_key]?.limit,
-                                used: limitsMap[client.public_key]?.used || 0,
-                                expiry_date: limitsMap[client.public_key]?.expiry_date,
-                                is_active: limitsMap[client.public_key]?.is_active !== false,
-                                traffic: currentTraffic[client.public_key]?.traffic || client.traffic,
-                                handshake: currentTraffic[client.public_key]?.handshake || client.handshake
-                            }));
-                        }
+                        await this.loadAllData(); // полная перезагрузка
                     } else {
                         const error = await response.json();
                         this.error = error.detail || 'Failed to set expiry date';
@@ -1038,11 +876,8 @@ async fetchTraffic() {
             async fetchUsers() {
                 try {
                     const response = await fetch('/api/users', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-
                     if (response.ok) {
                         this.users = await response.json();
                     }
@@ -1055,17 +890,15 @@ async fetchTraffic() {
                 this.addingUser = true;
                 this.error = '';
                 this.success = '';
-
                 try {
                     const response = await fetch('/api/users', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(this.newUser)
                     });
-
                     if (response.ok) {
                         this.newUser = { username: '', password: '', role: 'user' };
                         this.success = 'User created successfully';
@@ -1091,12 +924,11 @@ async fetchTraffic() {
                 this.savingUser = true;
                 this.error = '';
                 this.success = '';
-
                 try {
                     const response = await fetch(`/api/users/${this.editingUser.id}`, {
                         method: 'PUT',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
@@ -1105,7 +937,6 @@ async fetchTraffic() {
                             role: this.editingUser.role || null
                         })
                     });
-
                     if (response.ok) {
                         this.success = 'User updated successfully';
                         setTimeout(() => this.success = '', 3000);
@@ -1123,9 +954,7 @@ async fetchTraffic() {
             },
 
             deleteUserConfirm(user) {
-                if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) {
-                    return;
-                }
+                if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) return;
                 this.deleteUser(user.id);
             },
 
@@ -1133,11 +962,8 @@ async fetchTraffic() {
                 try {
                     const response = await fetch(`/api/users/${userId}`, {
                         method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-
                     if (response.ok) {
                         this.success = 'User deleted successfully';
                         setTimeout(() => this.success = '', 3000);
@@ -1152,17 +978,12 @@ async fetchTraffic() {
             },
 
             copyToClipboard(text) {
-                // Проверяем доступность clipboard API
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(() => {
                         this.success = 'Link copied!';
                         setTimeout(() => this.success = '', 2000);
-                    }).catch(() => {
-                        // Fallback
-                        this.fallbackCopy(text);
-                    });
+                    }).catch(() => this.fallbackCopy(text));
                 } else {
-                    // Fallback для старых браузеров/не HTTPS
                     this.fallbackCopy(text);
                 }
             },
@@ -1188,15 +1009,11 @@ async fetchTraffic() {
             async fetchServers() {
                 try {
                     const response = await fetch('/api/servers', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         const servers = await response.json();
                         this.servers = servers;
-                        // Запрашиваем статус для каждого сервера
                         servers.forEach(server => this.fetchServerStatus(server.id));
                     }
                 } catch (err) {
@@ -1207,17 +1024,12 @@ async fetchTraffic() {
             async fetchServerStatus(serverId) {
                 try {
                     const response = await fetch(`/api/servers/${serverId}/status`, {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         const status = await response.json();
                         const server = this.servers.find(s => s.id === serverId);
-                        if (server) {
-                            server.status = status;
-                        }
+                        if (server) server.status = status;
                     }
                 } catch (err) {
                     console.error('Failed to fetch server status');
@@ -1228,27 +1040,17 @@ async fetchTraffic() {
                 this.addingServer = true;
                 this.error = '';
                 this.success = '';
-                
                 try {
                     const response = await fetch('/api/servers', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(this.newServer)
                     });
-                    
                     if (response.ok) {
-                        this.newServer = {
-                            name: '',
-                            host: '',
-                            port: 22,
-                            username: '',
-                            auth_type: 'password',
-                            password: '',
-                            private_key: ''
-                        };
+                        this.newServer = { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' };
                         this.success = 'Server added successfully';
                         setTimeout(() => this.success = '', 3000);
                         this.fetchServers();
@@ -1266,17 +1068,12 @@ async fetchTraffic() {
             async testServer(serverId) {
                 const server = this.servers.find(s => s.id === serverId);
                 if (!server) return;
-                
                 server.testing = true;
-                
                 try {
                     const response = await fetch(`/api/servers/${serverId}/test`, {
                         method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         this.success = 'Connection successful';
                         await this.fetchServerStatus(serverId);
@@ -1297,38 +1094,24 @@ async fetchTraffic() {
                 this.currentSetupServerId = serverId;
                 this.setupLogs = [];
                 this.showSetupModal = true;
-                
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const ws = new WebSocket(`${protocol}//${window.location.host}/api/servers/${serverId}/setup-ws`);
-                
                 ws.onopen = () => {
-                    console.log('WebSocket opened, sending token...');
-                    ws.send(JSON.stringify({
-                        token: localStorage.getItem('token')
-                        // не отправляем sudo_password - он берется из БД на сервере
-                    }));
+                    ws.send(JSON.stringify({ token: this.getToken() }));
                 };
-                
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    console.log('Received:', data);
                     this.setupLogs.push(data);
-                    
                     this.$nextTick(() => {
                         const logContainer = document.querySelector('.bg-gray-900');
-                        if (logContainer) {
-                            logContainer.scrollTop = logContainer.scrollHeight;
-                        }
+                        if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
                     });
                 };
-                
                 ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
                     this.setupLogs.push({ type: 'error', message: 'WebSocket error occurred' });
                 };
-                
                 ws.onclose = () => {
-                    console.log('WebSocket closed');
                     this.fetchServerStatus(serverId);
                 };
             },
@@ -1340,23 +1123,16 @@ async fetchTraffic() {
             },
 
             editServer(server) {
-                // TODO: реализовать редактирование
                 alert('Edit server - coming soon');
             },
 
             async deleteServer(serverId, serverName) {
-                if (!confirm(`Are you sure you want to delete server "${serverName}"?`)) {
-                    return;
-                }
-                
+                if (!confirm(`Are you sure you want to delete server "${serverName}"?`)) return;
                 try {
                     const response = await fetch(`/api/servers/${serverId}`, {
                         method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         this.servers = this.servers.filter(s => s.id !== serverId);
                         this.success = 'Server deleted successfully';
@@ -1370,16 +1146,14 @@ async fetchTraffic() {
                 }
             },
 
-
-
-
-			
             logout() {
                 localStorage.removeItem('token');
                 localStorage.removeItem('role');
                 localStorage.removeItem('username');
                 window.location.href = '/login';
             }
-        }
+        };
     }
-</script>
+    </script>
+</body>
+</html>

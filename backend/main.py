@@ -1,40 +1,39 @@
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, status, Request, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
-from typing import Optional
-from fastapi import WebSocket, WebSocketDisconnect
-from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+from contextlib import asynccontextmanager
 import os
-
-from database import activate_client, deactivate_client, check_and_deactivate_overlimit, get_all_users, create_user, update_user, delete_user
+import asyncio
 
 from auth import authenticate_user, create_access_token, decode_token
-from awg_manager import AWGManager
+import database as db
+from awg_manager import AmneziaWGServer
+from connection import LocalConnection, SSHConnection
+from logger import setup_logger, logger
+from tasks import collect_stats_periodically
 
-app = FastAPI(title="Amnezia Panel")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(collect_stats_periodically())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
+app = FastAPI(title="Amnezia Panel", lifespan=lifespan)
+
+# Статика
 static_dir = "/frontend/static"
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-    print(f"Static directory mounted at {static_dir}")
+    logger.info(f"Static directory mounted at {static_dir}")
 else:
-    print(f"Static directory {static_dir} not found")
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request, exc):
-    # Логируем полную ошибку для себя в консоль
-    print(f"!!! Internal Error on {request.url.path}: {exc}")
-    # А клиенту отдаём общее сообщение
-    return JSONResponse(status_code=500, content={"detail": "Internal server error, please try again later."})
+    logger.warning(f"Static directory {static_dir} not found")
 
 # CORS
 app.add_middleware(
@@ -45,18 +44,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-awg = AWGManager()
-
-def get_token_payload(request: Request):
-    """Helper функция для проверки и получения payload из токена"""
+# ---------- Зависимости ----------
+async def get_current_user(request: Request):
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return None
-    
+        raise HTTPException(status_code=401, detail="Not authenticated")
     token = auth_header.split(" ")[1]
-    return decode_token(token)
+    payload = decode_token(token)
+    if not payload:
+        logger.warning(f"Invalid token from {request.client.host}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
 
+async def get_current_admin(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "admin":
+        logger.warning(f"Non-admin user {current_user.get('sub')} attempted admin action")
+        raise HTTPException(status_code=403, detail="Admin only")
+    return current_user
+
+async def get_server(server_id: int = 1, admin: dict = Depends(get_current_admin)):
+    """Возвращает экземпляр AmneziaWGServer для указанного сервера."""
+    server_data = await db.get_server(server_id)
+    if not server_data:
+        raise HTTPException(status_code=404, detail="Server not found")
+    if server_data['auth_type'] == 'local':
+        conn = LocalConnection()
+        logger.debug(f"Using local connection for server {server_id}")
+    else:
+        conn = SSHConnection(
+            host=server_data['host'],
+            port=server_data['port'],
+            username=server_data['username'],
+            password=server_data.get('password'),
+            private_key=server_data.get('private_key'),
+            sudo_password=server_data.get('password') if server_data['auth_type'] == 'password' else None
+        )
+        logger.debug(f"Using SSH connection for server {server_id} ({server_data['host']})")
+    return AmneziaWGServer(conn, server_id=server_id)
+
+# ---------- Модели ----------
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -69,22 +95,25 @@ class TokenResponse(BaseModel):
 class ClientCreate(BaseModel):
     name: str
 
+class ExpiryDateRequest(BaseModel):
+    expiry_date: Optional[str] = None
+
 class UserCreate(BaseModel):
     username: str
     password: str
     role: str = "user"
 
 class UserUpdate(BaseModel):
-    username: str = None
-    password: str = None
-    role: str = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
 
 class ServerCreate(BaseModel):
     name: str
     host: Optional[str] = None
     port: int = 22
     username: Optional[str] = None
-    auth_type: str = "local"  # local, password, key, key+sudo
+    auth_type: str = "local"
     password: Optional[str] = None
     private_key: Optional[str] = None
 
@@ -98,568 +127,251 @@ class ServerUpdate(BaseModel):
     private_key: Optional[str] = None
     is_active: Optional[bool] = None
 
-class ExpiryDateRequest(BaseModel):
-    expiry_date: Optional[str] = None  # формат: "2024-12-31 23:59:59"
-
+# ---------- Эндпоинты ----------
 @app.post("/api/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
-    user = authenticate_user(request.username, request.password)
+    logger.info(f"Login attempt for user {request.username}")
+    user = await authenticate_user(request.username, request.password)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password"
-        )
-    
-    token = create_access_token(
-        data={"sub": user["username"], "role": user["role"]}
-    )
-    
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "role": user["role"]
-    }
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    token = create_access_token(data={"sub": user["username"], "role": user["role"]})
+    logger.info(f"User {request.username} logged in successfully")
+    return {"access_token": token, "token_type": "bearer", "role": user["role"]}
 
 @app.get("/api/verify-token")
-async def verify_token(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    return {"username": payload.get("sub"), "role": payload.get("role")}
+async def verify_token(current_user: dict = Depends(get_current_user)):
+    return {"username": current_user.get("sub"), "role": current_user.get("role")}
 
 @app.get("/api/clients")
-async def get_clients(request: Request, server_id: Optional[int] = None):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    awg = AWGManager(server_id=server_id or 1)
-    return await awg.get_clients()
+async def get_clients(server: AmneziaWGServer = Depends(get_server)):
+    return await server.get_clients()
 
 @app.post("/api/clients")
-async def create_client(client: ClientCreate, request: Request, server_id: Optional[int] = None):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    awg = AWGManager(server_id=server_id or 1)
-    return await awg.add_client(client.name)
+async def create_client(client: ClientCreate, server: AmneziaWGServer = Depends(get_server)):
+    return await server.add_client(client.name)
+
+@app.delete("/api/clients")
+async def delete_client(public_key: str, server: AmneziaWGServer = Depends(get_server)):
+    await server.delete_client(public_key)
+    return {"message": "Client deleted successfully"}
 
 @app.get("/api/traffic")
-async def get_traffic(request: Request, server_id: Optional[int] = None):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    awg = AWGManager(server_id=server_id or 1)
-    return await awg.get_traffic()
+async def get_traffic(server: AmneziaWGServer = Depends(get_server)):
+    return await server.get_traffic()
 
 @app.get("/api/user-config")
-async def get_user_config(public_key: str, request: Request, server_id: Optional[int] = None):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    # Если server_id не передан, используем сервер из запроса или 1
-    if not server_id:
-        # Попробуем получить server_id из query params
-        server_id = request.query_params.get("server_id")
-    
-    awg = AWGManager(server_id=int(server_id) if server_id else 1)
-    config = await awg.get_client_config(public_key)
+async def get_user_config(public_key: str, server: AmneziaWGServer = Depends(get_server)):
+    config = await server.get_client_config(public_key)
     if not config:
         raise HTTPException(status_code=404, detail="Client not found")
-    
     return {"config": config}
-   
-@app.delete("/api/clients")
-async def delete_client(public_key: str, request: Request, server_id: Optional[int] = None):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    try:
-        awg = AWGManager(server_id=server_id or 1)
-        await awg.delete_client(public_key)
-        return {"message": "Client deleted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-# ========== LIMITS FUNCTIONS ==========
 @app.get("/api/limits")
-async def get_limits(request: Request, server_id: Optional[int] = None):
-    payload = get_token_payload(request)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    # Получаем всех клиентов из AWG
-    awg = AWGManager(server_id=server_id or 1)
-    clients = await awg.get_clients()
+async def get_limits(admin: dict = Depends(get_current_admin)):
+    clients = await db.get_all_clients()
     result = []
-    
-    for client in clients:
-        # Пробуем получить из БД
-        from database import get_client, create_client
-        db_client = get_client(client["public_key"])
-        
-        if not db_client:
-            # Если нет в БД - создаём
-            create_client(
-                client["public_key"], 
-                client["name"], 
-                client["ip"]
-            )
-            db_client = get_client(client["public_key"])
-        
-        # Форматируем дату для отображения
-        expiry_date = db_client["expiry_date"] if db_client else None
-        if expiry_date:
-            try:
-                # Преобразуем в читаемый формат
-                dt = datetime.fromisoformat(expiry_date.replace(' ', 'T'))
-                expiry_date = dt.strftime("%Y-%m-%d %H:%M")
-            except:
-                pass
-        
+    for c in clients:
         result.append({
-            "public_key": client["public_key"],
-            "name": client["name"],
-            "ip": client["ip"],
-            "limit": db_client["limit"] if db_client else None,
-            "used": db_client["used"] if db_client else 0,
-            "expiry_date": expiry_date,
-            "is_active": db_client["is_active"] if db_client else True
+            "public_key": c["public_key"],
+            "name": c["name"],
+            "ip": c["ip"],
+            "limit": c["traffic_limit_bytes"],          # было traffic_limit_bytes
+            "used": c["traffic_used_bytes"] or 0,       # было traffic_used_bytes
+            "expiry_date": c["expiry_date"],
+            "is_active": c["is_active"],
+            "server_id": c["server_id"],
+            "server_name": c["server_name"]
         })
-    
     return result
 
 @app.post("/api/limits")
-async def set_limit(public_key: str, limit_bytes: int, request: Request, server_id: Optional[int] = None):
-    payload = get_token_payload(request)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
+async def set_limit(public_key: str, limit_bytes: int, server: AmneziaWGServer = Depends(get_server)):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    
-    from database import set_client_limit_async
-    await set_client_limit_async(decoded_key, limit_bytes)
-    
-    awg = AWGManager(server_id=server_id or 1)
-    await awg.unblock_client(decoded_key)
-    
+    logger.info(f"Received set_limit request for {decoded_key[:8]}... with limit {limit_bytes}")
+    client_info = await server.get_client_info(decoded_key)
+    if not client_info:
+        raise HTTPException(status_code=404, detail="Client not found in server config")
+    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server.server_id)
+    await db.set_client_limit(decoded_key, limit_bytes)
+    await server.unblock_client(decoded_key)
+    logger.info(f"Client {decoded_key[:8]}... unblocked after setting limit")
     return {"message": "Limit set"}
 
-@app.post("/api/clients/{public_key}/expiry")
-async def set_client_expiry_endpoint(public_key: str, request: Request, expiry: ExpiryDateRequest):
-    """Устанавливает дату истечения для клиента"""
-    payload = get_token_payload(request)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
+@app.post("/api/clients/expiry")
+async def set_client_expiry_endpoint(
+    public_key: str,
+    expiry: ExpiryDateRequest,
+    server: AmneziaWGServer = Depends(get_server)
+):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    from database import set_client_expiry
-    
-    set_client_expiry(decoded_key, expiry.expiry_date)
-    
-    return {"message": "Expiry date set successfully"}
+    logger.info(f"Setting expiry for {decoded_key[:8]}... to {expiry.expiry_date}")
+    client_info = await server.get_client_info(decoded_key)
+    if not client_info:
+        raise HTTPException(status_code=404, detail="Client not found in server config")
+    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server.server_id)
+    await db.set_client_expiry(decoded_key, expiry.expiry_date)
+    return {"message": "Expiry date set"}
 
 @app.post("/api/clients/{public_key}/activate")
-async def activate_client_endpoint(public_key: str, request: Request):
-    payload = get_token_payload(request)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
+async def activate_client_endpoint(public_key: str, admin: dict = Depends(get_current_admin)):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    activate_client(decoded_key)
+    await db.activate_client(decoded_key)
     return {"message": "Client activated"}
 
 @app.post("/api/clients/{public_key}/deactivate")
-async def deactivate_client_endpoint(public_key: str, request: Request):
-    payload = get_token_payload(request)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
+async def deactivate_client_endpoint(public_key: str, admin: dict = Depends(get_current_admin)):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    deactivate_client(decoded_key)
+    await db.deactivate_client(decoded_key)
     return {"message": "Client deactivated"}
 
-@app.post("/api/cron/check-limits")
-async def cron_check_limits(request: Request):
-    """
-    Внутренний эндпоинт для cron.
-    Проверяет лимиты трафика и даты, деактивирует клиентов.
-    """
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or auth_header != "Bearer internal-cron-token":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    
-    from database import check_and_deactivate_overlimit, check_expired_clients
-    from awg_manager import AWGManager
-    
-    # Получаем все серверы
-    from database import get_all_servers
-    servers = get_all_servers()
-    
-    results = {}
-    for server in servers:
-        if server['is_active']:
-            try:
-                awg = AWGManager(server_id=server['id'])
-                traffic_deactivated = check_and_deactivate_overlimit(awg)
-                expiry_deactivated = check_expired_clients(awg)
-                
-                results[server['id']] = {
-                    "traffic_deactivated": traffic_deactivated,
-                    "expiry_deactivated": expiry_deactivated,
-                    "total": len(traffic_deactivated) + len(expiry_deactivated)
-                }
-            except Exception as e:
-                results[server['id']] = {"error": str(e)}
-    
-    return {"results": results}
-
 @app.post("/api/iptables/sync")
-async def sync_iptables(request: Request, server_id: Optional[int] = None):
-    payload = get_token_payload(request)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    awg = AWGManager(server_id=server_id or 1)
-    await awg.sync_iptables_with_db()
+async def sync_iptables(server: AmneziaWGServer = Depends(get_server)):
+    await server.sync_iptables_with_db()
     return {"message": "iptables synchronized"}
 
-# ========== USERS MANAGEMENT ==========
-
-@app.get("/api/users")
-async def get_users(request: Request):
-    """Получает список всех пользователей"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    return get_all_users()
-
-@app.post("/api/users")
-async def create_user_endpoint(user: UserCreate, request: Request):
-    """Создаёт нового пользователя"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    if create_user(user.username, user.password, user.role):
-        return {"message": "User created successfully"}
-    else:
-        raise HTTPException(status_code=400, detail="User already exists")
-
-@app.put("/api/users/{user_id}")
-async def update_user_endpoint(user_id: int, user: UserUpdate, request: Request):
-    """Обновляет пользователя"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    update_user(user_id, user.username, user.password, user.role)
-    return {"message": "User updated successfully"}
-
-@app.delete("/api/users/{user_id}")
-async def delete_user_endpoint(user_id: int, request: Request):
-    """Удаляет пользователя"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    delete_user(user_id)
-    return {"message": "User deleted successfully"}
-
 @app.get("/api/generate-link")
-async def generate_vpn_link(public_key: str, request: Request, server_id: Optional[int] = None):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    from database import get_client
-    client = get_client(public_key)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    
-    server_id = server_id or client.get('server_id', 1)
-    
-    awg = AWGManager(server_id=server_id)
-    link = await awg.generate_amnezia_vpn_link(
-        client_ip=client["ip"],
-        client_private_key=client["private_key"],
-        client_public_key=public_key
-    )
-    
+async def generate_vpn_link(public_key: str, server: AmneziaWGServer = Depends(get_server)):
+    link = await server.generate_amnezia_vpn_link(public_key)
     return {"link": link}
 
-# ========== MULTI-SERVER MANAGEMENT ==========
+# ---------- Управление пользователями ----------
+@app.get("/api/users")
+async def get_users(admin: dict = Depends(get_current_admin)):
+    return await db.get_all_users()
+
+@app.post("/api/users")
+async def create_user_endpoint(user: UserCreate, admin: dict = Depends(get_current_admin)):
+    if await db.create_user(user.username, user.password, user.role):
+        return {"message": "User created"}
+    raise HTTPException(status_code=400, detail="User already exists")
+
+@app.put("/api/users/{user_id}")
+async def update_user_endpoint(user_id: int, user: UserUpdate, admin: dict = Depends(get_current_admin)):
+    await db.update_user(user_id, user.username, user.password, user.role)
+    return {"message": "User updated"}
+
+@app.delete("/api/users/{user_id}")
+async def delete_user_endpoint(user_id: int, admin: dict = Depends(get_current_admin)):
+    await db.delete_user(user_id)
+    return {"message": "User deleted"}
+
+# ---------- Управление серверами ----------
 @app.get("/api/servers")
-async def get_servers(request: Request):
-    """Получает список всех серверов"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_all_servers
-    return get_all_servers()
+async def get_servers(admin: dict = Depends(get_current_admin)):
+    return await db.get_all_servers()
 
 @app.post("/api/servers")
-async def create_server(server: ServerCreate, request: Request):
-    """Создаёт новый сервер"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import add_server
-    server_id = add_server(server.dict())
-    return {"id": server_id, "message": "Server created successfully"}
+async def create_server(server: ServerCreate, admin: dict = Depends(get_current_admin)):
+    server_id = await db.add_server(server.dict())
+    return {"id": server_id, "message": "Server created"}
 
 @app.put("/api/servers/{server_id}")
-async def update_server(server_id: int, server: ServerUpdate, request: Request):
-    """Обновляет сервер"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import update_server
-    update_server(server_id, server.dict(exclude_unset=True))
-    return {"message": "Server updated successfully"}
+async def update_server(server_id: int, server: ServerUpdate, admin: dict = Depends(get_current_admin)):
+    await db.update_server(server_id, server.dict(exclude_unset=True))
+    return {"message": "Server updated"}
 
 @app.delete("/api/servers/{server_id}")
-async def delete_server(server_id: int, request: Request):
-    """Удаляет сервер"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import delete_server
+async def delete_server(server_id: int, admin: dict = Depends(get_current_admin)):
     try:
-        delete_server(server_id)
-        return {"message": "Server deleted successfully"}
+        await db.delete_server(server_id)
+        return {"message": "Server deleted"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/servers/{server_id}/test")
-async def test_server_connection(server_id: int, request: Request):
-    """Тестирует подключение к серверу"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_server
-    server = get_server(server_id)
-    if not server:
+async def test_server_connection(server_id: int, admin: dict = Depends(get_current_admin)):
+    server_data = await db.get_server(server_id)
+    if not server_data:
         raise HTTPException(status_code=404, detail="Server not found")
-    
     try:
-        # Создаём временный менеджер и пробуем подключиться
-        test_awg = AWGManager(server_id=server_id)
-        await test_awg._exec_in_container("echo 'test'")
+        if server_data['auth_type'] == 'local':
+            conn = LocalConnection()
+        else:
+            conn = SSHConnection(
+                host=server_data['host'],
+                port=server_data['port'],
+                username=server_data['username'],
+                password=server_data.get('password'),
+                private_key=server_data.get('private_key')
+            )
+        awg = AmneziaWGServer(conn, server_id)
+        await awg.conn.run_command("echo 'test'")
         return {"status": "ok", "message": "Connection successful"}
     except Exception as e:
+        logger.error(f"Server {server_id} connection test failed: {e}")
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
 
-@app.post("/api/servers/{server_id}/setup")
-async def setup_server(server_id: int, request: Request, sudo_password: Optional[str] = None):
-    """Устанавливает AmneziaWG на удалённый сервер"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_server
-    server = get_server(server_id)
-    if not server:
+@app.get("/api/servers/{server_id}/status")
+async def get_server_status(server_id: int, admin: dict = Depends(get_current_admin)):
+    server_data = await db.get_server(server_id)
+    if not server_data:
         raise HTTPException(status_code=404, detail="Server not found")
-    
     try:
-        awg = AWGManager(server_id=server_id)
-        result = await awg.setup_server(sudo_password)
-        return result
+        if server_data['auth_type'] == 'local':
+            conn = LocalConnection()
+        else:
+            conn = SSHConnection(
+                host=server_data['host'],
+                port=server_data['port'],
+                username=server_data['username'],
+                password=server_data.get('password'),
+                private_key=server_data.get('private_key')
+            )
+        awg = AmneziaWGServer(conn, server_id)
+        status = {
+            "online": True,
+            "container_running": False,
+            "version": None,
+            "clients_count": 0,
+            "errors": []
+        }
+        res = await awg.conn.run_command("docker ps --filter name=amnezia-awg2 --format '{{.Status}}'")
+        if 'Up' in res:
+            status["container_running"] = True
+            version = await awg.conn.run_command("awg version 2>/dev/null || echo 'unknown'")
+            status["version"] = version.strip()
+            clients = await awg.get_clients()
+            status["clients_count"] = len(clients)
+        return status
     except Exception as e:
+        logger.error(f"Failed to get status for server {server_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ---------- WebSocket для установки сервера (временно заглушка) ----------
 @app.websocket("/api/servers/{server_id}/setup-ws")
 async def websocket_setup_server(websocket: WebSocket, server_id: int):
-    """WebSocket для установки сервера с real-time логами"""
     await websocket.accept()
-    
     try:
-        # Получаем токен из первого сообщения
         data = await websocket.receive_json()
-        print(f"Received data: {data}")  # Логируем полученные данные
-        
         token = data.get("token")
-        sudo_password = data.get("sudo_password")
-        
-        # Проверяем токен
         if not token:
-            await websocket.send_json({"type": "error", "message": "No token provided"})
+            await websocket.send_json({"type": "error", "message": "No token"})
             await websocket.close()
             return
-            
         payload = decode_token(token)
         if not payload or payload.get("role") != "admin":
             await websocket.send_json({"type": "error", "message": "Unauthorized"})
             await websocket.close()
             return
-        
-        # Получаем данные сервера из БД
-        from database import get_server
-        server = get_server(server_id)
-        if not server:
+
+        server_data = await db.get_server(server_id)
+        if not server_data:
             await websocket.send_json({"type": "error", "message": "Server not found"})
             await websocket.close()
             return
-        
-        print(f"Setting up server {server_id} with sudo password: {'provided' if sudo_password else 'not provided'}")
-        
-        # Создаём менеджер с параметрами сервера
-        connection_params = {
-            'type': 'remote',
-            'auth_type': server['auth_type'],
-            'host': server['host'],
-            'port': server['port'],
-            'username': server['username'],
-            'password': server.get('password'),  # Может быть None
-            'private_key': server.get('private_key')  # Может быть None
-        }
-        
-        awg = AWGManager(server_id=server_id, connection_params=connection_params)
-        
-        # Запускаем установку с переданным паролем sudo
-        async for update in awg.setup_server_stream(sudo_password):
-            await websocket.send_json(update)
-            
-    except WebSocketDisconnect:
-        print(f"Client disconnected from server {server_id} setup")
+
+        await websocket.send_json({"type": "info", "message": "Setup not yet implemented in refactored code"})
     except Exception as e:
-        print(f"WebSocket error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except:
-            pass
+        logger.error(f"WebSocket setup error: {e}")
+        await websocket.send_json({"type": "error", "message": str(e)})
     finally:
-        try:
-            await websocket.close()
-        except:
-            pass
+        await websocket.close()
 
-@app.get("/api/servers/{server_id}/status")
-async def get_server_status(server_id: int, request: Request):
-    """Получает статус сервера"""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = auth_header.split(" ")[1]
-    payload = decode_token(token)
-    if not payload or payload.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
-    
-    from database import get_server
-    server = get_server(server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
-    
-    try:
-        awg = AWGManager(server_id=server_id)
-        status = await awg.get_server_status()
-        return status
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# HTML страницы
+# ---------- Статические страницы ----------
 @app.get("/")
 async def root():
     return FileResponse("/frontend/login.html")
@@ -680,6 +392,20 @@ async def user_page():
 async def users_page():
     return FileResponse("/frontend/users.html")
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# ---------- Обработчики исключений ----------
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    logger.warning(f"HTTP {exc.status_code} on {request.url.path}: {exc.detail}")
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc):
+    logger.error(f"Internal error on {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error, please try again later."})
+
+# ---------- Startup ----------
+@app.on_event("startup")
+async def startup():
+    setup_logger()
+    await db.init_db()
+    logger.info("Application started, debug mode: %s", os.getenv("DEBUG", "False"))
