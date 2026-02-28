@@ -14,6 +14,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - JWT_SECRET=${JWT_SECRET}
+      - DEBUG=${DEBUG}
     networks:
         - panel-network
     expose:
