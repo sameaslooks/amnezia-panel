@@ -2,6 +2,9 @@ import asyncio
 from typing import AsyncGenerator, Optional
 from connection import SSHConnection
 from logger import logger
+import random
+import secrets
+import struct
 
 async def setup_server_stream(
     conn: SSHConnection,
@@ -100,32 +103,15 @@ echo "Keys generated"
         yield {"type": "step", "name": "🔑 Server keys generated", "success": True, "output": keys_out}
 
         # ---- 7. Создание базового конфига сервера (внутри контейнера) ----
-        config_script = """docker exec amnezia-awg2 sh -c '
-PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key)
-cat > /opt/amnezia/awg/awg0.conf << EOF
-[Interface]
-ListenPort = 32308
-PrivateKey = $PRIVATE_KEY
-Address = 10.8.1.0/24
-Jc = 4
-Jmin = 10
-Jmax = 50
-S1 = 95
-S2 = 21
-S3 = 6
-S4 = 10
-H1 = 1144016577-1678296790
-H2 = 2067003202-2073469039
-H3 = 2118455839-2136843295
-H4 = 2142407594-2142521231
-# I1 = <b 0x084481800001000300000000077469636b65747306776964676574096b696e6f706f69736b0272750000010001c00c0005000100000039001806776964676574077469636b6574730679616e646578c025c0390005000100000039002b1765787465726e616c2d7469636b6574732d776964676574066166697368610679616e646578036e657400c05d000100010000001c000457fafe25>
-# I2 =
-# I3 =
-# I4 =
-# I5 =
-EOF
-echo "Server config created"
-'"""
+        awg_params = generate_awg_config()
+        include_i1 = True
+        config_script = f"""docker exec amnezia-awg2 sh -c '
+        PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key)
+        cat > /opt/amnezia/awg/awg0.conf << EOF
+        {format_config(awg_params, include_i1)}
+        EOF
+        echo "Server config created"
+        '"""
         config_out = await conn.run_command(config_script, in_container=False)
         yield {"type": "step", "name": "📝 Server config created", "success": True, "output": config_out}
 
@@ -151,3 +137,46 @@ echo "Server config created"
         yield {"type": "error", "message": str(e)}
     finally:
         await conn.close()
+
+def generate_awg_config():
+    config = {}
+    config['port'] = random.randint(10000, 65000)
+    config['jc'] = random.randint(3, 8)
+    config['jmin'] = random.randint(5, 20)
+    config['jmax'] = random.randint(30, 70)
+    if config['jmin'] >= config['jmax']:
+        config['jmax'] = config['jmin'] + random.randint(10, 30)
+    config['s1'] = random.randint(30, 150)     # 40 в примере
+    config['s2'] = random.randint(20, 150)     # 138 в примере
+    config['s3'] = random.randint(1, 50)       # 42 в примере
+    config['s4'] = random.randint(5, 30)       # 15 в примере
+    config['h1'] = f"{random.randint(10**9, 2*10**9)}-{random.randint(10**9, 2*10**9)}"
+    config['h2'] = f"{random.randint(1_900_000_000, 2_100_000_000)}-{random.randint(2_000_000_000, 2_200_000_000)}"
+    config['h3'] = f"{random.randint(2_100_000_000, 2_200_000_000)}-{random.randint(2_130_000_000, 2_150_000_000)}"
+    config['h4'] = f"{random.randint(2_140_000_000, 2_200_000_000)}-{random.randint(2_140_000_000, 2_200_000_000)}"
+    i1_hex = secrets.token_hex(64)
+    config['i1'] = f"<b 0x{i1_hex}>"
+    return config
+
+def format_config(config, include_i1=False):
+    """Форматирует конфиг с возможностью включить/выключить I1"""
+    lines = [
+        "[Interface]",
+        f"ListenPort = {config['port']}",
+        "PrivateKey = $PRIVATE_KEY",
+        "Address = 10.8.1.0/24",
+        f"Jc = {config['jc']}",
+        f"Jmin = {config['jmin']}",
+        f"Jmax = {config['jmax']}",
+        f"S1 = {config['s1']}",
+        f"S2 = {config['s2']}",
+        f"S3 = {config['s3']}",
+        f"S4 = {config['s4']}",
+        f"H1 = {config['h1']}",
+        f"H2 = {config['h2']}",
+        f"H3 = {config['h3']}",
+        f"H4 = {config['h4']}",
+    ]
+    if include_i1:
+        lines.append(f"# I1 = {config['i1']}")
+    return "\n".join(lines)
