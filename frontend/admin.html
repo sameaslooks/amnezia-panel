@@ -197,6 +197,26 @@
 
             <!-- CLIENTS TAB -->
             <div x-show="activeTab === 'clients'">
+                <!-- Client filter by user -->
+                <div class="mb-4 flex items-center gap-4">
+                    <label class="text-sm font-medium">Filter by user:</label>
+                    <select x-model="filterUserId" class="px-3 py-2 border border-gray-300 rounded text-sm">
+                        <option value="">All users</option>
+                        <template x-for="user in users" :key="user.id">
+                            <option :value="user.id" x-text="user.username"></option>
+                        </template>
+                    </select>
+                </div>
+                <!-- Sync clients button -->
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold">VPN Clients</h2>
+                    <button @click="syncClients" 
+                            class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm flex items-center gap-1"
+                            :disabled="syncing">
+                        <span x-show="!syncing">⟲ Sync from servers</span>
+                        <span x-show="syncing">⟳ Syncing...</span>
+                    </button>
+                </div>
                 <!-- Add Client Form -->
                 <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                     <h2 class="text-lg font-bold mb-4">Add New Client</h2>
@@ -217,6 +237,15 @@
                                     </template>
                                 </select>
                             </div>
+                            <div class="w-48">
+                                <label class="block text-sm text-gray-600 mb-1">User</label>
+                                <select x-model="selectedUserId" class="w-full px-3 py-2 border border-gray-300 rounded">
+                                    <option value="">Select user</option>
+                                    <template x-for="user in users" :key="user.id">
+                                        <option :value="user.id" x-text="user.username"></option>
+                                    </template>
+                                </select>
+                            </div>
                             <button type="submit" 
                                     class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 h-[42px]"
                                     :disabled="adding">
@@ -234,6 +263,7 @@
                             <thead>
                                 <tr class="bg-gray-50">
                                     <th class="px-4 py-2 text-left">Server</th>
+                                    <th class="px-4 py-2 text-left">User</th>
                                     <th class="px-4 py-2 text-left">Name</th>
                                     <th class="px-4 py-2 text-left">IP</th>
                                     <th class="px-4 py-2 text-left">Public Key</th>
@@ -253,6 +283,7 @@
                                             <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" 
                                                 x-text="client.server_name || 'local'"></span>
                                         </td>
+                                        <td class="px-4 py-2" x-text="client.username || '—'"></td>
                                         <td class="px-4 py-2" x-text="client.name"></td>
                                         <td class="px-4 py-2" x-text="client.ip"></td>
                                         <td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
@@ -547,6 +578,8 @@
             currentSetupServerId: null,
             activeTab: 'clients',
             selectedServerId: 1,
+            filterUserId: '',
+            selectedUserId: '',
 
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
@@ -559,6 +592,7 @@
             savingUser: false,
             addingServer: false,
             showSetupModal: false,
+            syncing: false,
             qrSize: 400,
 
             // Helper
@@ -587,28 +621,11 @@
                 }, 30000);
             },
 
-            // Единая загрузка всех основных данных (кроме трафика)
             async loadAllData() {
                 try {
                     const token = this.getToken();
                     if (this.servers.length === 0) {
                         await this.fetchServers();
-                    }
-
-                    // Собираем клиентов со всех серверов
-                    const allClients = [];
-                    for (const server of this.servers) {
-                        const clientsRes = await fetch(`/api/clients?server_id=${server.id}`, {
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                        if (clientsRes.ok) {
-                            const serverClients = await clientsRes.json();
-                            serverClients.forEach(c => {
-                                c.server_id = server.id;
-                                c.server_name = server.name;
-                            });
-                            allClients.push(...serverClients);
-                        }
                     }
 
                     const [limitsRes, usersRes] = await Promise.all([
@@ -617,23 +634,9 @@
                     ]);
 
                     if (limitsRes.ok && usersRes.ok) {
-                        const limits = await limitsRes.json();
-                        const users = await usersRes.json();
-                        const limitsMap = {};
-                        limits.forEach(l => limitsMap[l.public_key] = l);
-
-                        this.clients = allClients.map(client => {
-                            const limitData = limitsMap[client.public_key];
-                            return {
-                                ...client,
-                                limit: limitData?.limit,
-                                used: limitData?.used || 0,
-                                expiry_date: limitData?.expiry_date,
-                                is_active: limitData ? limitData.is_active === 1 : true  // изменено
-                            };
-                        });
-                        this.users = users;
-                        await this.fetchTraffic();
+                        this.clients = await limitsRes.json();  // уже полные данные
+                        this.users = await usersRes.json();
+                        await this.fetchTraffic();               // обновит traffic и handshake
                     }
                 } catch (err) {
                     console.error('loadAllData error:', err);
@@ -694,6 +697,10 @@
                 this.error = '';
                 this.success = '';
                 try {
+                    if (!this.selectedUserId) {
+                        this.error = 'Please select a user';
+                        return;
+                    }
                     const url = this.selectedServerId && this.selectedServerId !== 1
                         ? `/api/clients?server_id=${this.selectedServerId}`
                         : '/api/clients';
@@ -703,7 +710,10 @@
                             'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ name: this.newClientName })
+                        body: JSON.stringify({ 
+                            name: this.newClientName,
+                            user_id: this.selectedUserId 
+                        })
                     });
                     if (response.ok) {
                         const newClient = await response.json();
@@ -1159,6 +1169,37 @@
                 } catch (err) {
                     this.error = 'Failed to delete server';
                 }
+            },
+
+            async syncClients() {
+                this.syncing = true;
+                this.error = '';
+                try {
+                    const token = this.getToken();
+                    for (const server of this.servers) {
+                        if (!server.is_active) continue;
+                        const url = `/api/clients?server_id=${server.id}`;
+                        const response = await fetch(url, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (!response.ok) {
+                            console.warn(`Failed to sync server ${server.name}: ${response.status}`);
+                        }
+                    }
+                    await this.loadAllData();
+                    this.success = 'Clients synchronized successfully';
+                    setTimeout(() => this.success = '', 3000);
+                } catch (err) {
+                    console.error('syncClients error:', err);
+                    this.error = 'Failed to sync clients';
+                } finally {
+                    this.syncing = false;
+                }
+            },
+            
+            get filteredClients() {
+                if (!this.filterUserId) return this.clients;
+                return this.clients.filter(c => c.user_id === this.filterUserId);
             },
 
             logout() {
