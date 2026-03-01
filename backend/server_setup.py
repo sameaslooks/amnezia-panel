@@ -115,16 +115,16 @@ echo "Keys generated"
         config_out = await conn.run_command(config_script, in_container=False)
         yield {"type": "step", "name": "📝 Server config created", "success": True, "output": config_out}
 
-        # ---- 8. Включение IP forwarding на хосте ----
+        # ---- 8. Перезапуск контейнера после внесения изменений ----
         await conn.run_command("sudo docker restart amnezia-awg2", in_container=False)
         yield {"type": "step", "name": "🔄 Restarting container", "success": True}
 
-        # ---- 8. Включение IP forwarding на хосте ----
+        # ---- 9. Включение IP forwarding на хосте ----
         await conn.run_command("sudo sysctl -w net.ipv4.ip_forward=1", in_container=False)
         await conn.run_command("echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf", in_container=False)
         yield {"type": "step", "name": "🌐 IP forwarding enabled", "success": True}
 
-        # ---- 9. Проверка статуса контейнера ----
+        # ---- 10. Проверка статуса контейнера ----
         await asyncio.sleep(3)
         status = await conn.run_command("sudo docker ps --filter name=amnezia-awg2 --format '{{.Status}}'", in_container=False)
         if "Up" in status:
@@ -154,7 +154,7 @@ def generate_awg_config():
     config['h2'] = f"{random.randint(1_900_000_000, 2_100_000_000)}-{random.randint(2_000_000_000, 2_200_000_000)}"
     config['h3'] = f"{random.randint(2_100_000_000, 2_200_000_000)}-{random.randint(2_130_000_000, 2_150_000_000)}"
     config['h4'] = f"{random.randint(2_140_000_000, 2_200_000_000)}-{random.randint(2_140_000_000, 2_200_000_000)}"
-    i1_hex = secrets.token_hex(64)
+    i1_hex = secrets.token_hex(256)
     config['i1'] = f"<b 0x{i1_hex}>"
     return config
 

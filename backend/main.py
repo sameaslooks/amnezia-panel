@@ -85,6 +85,24 @@ async def get_server(server_id: int = 1, admin: dict = Depends(get_current_admin
         logger.debug(f"Using SSH connection for server {server_id} ({server_data['host']})")
     return AmneziaWGServer(conn, server_id=server_id)
 
+async def get_server_public(server_id: int = 1):
+    """Возвращает экземпляр AmneziaWGServer для указанного сервера (без проверки админа)."""
+    server_data = await db.get_server(server_id)
+    if not server_data:
+        raise HTTPException(status_code=404, detail="Server not found")
+    if server_data['auth_type'] == 'local':
+        conn = LocalConnection()
+    else:
+        conn = SSHConnection(
+            host=server_data['host'],
+            port=server_data['port'],
+            username=server_data['username'],
+            password=server_data.get('password'),
+            private_key=server_data.get('private_key'),
+            sudo_password=server_data.get('password') if server_data['auth_type'] == 'password' else None
+        )
+    return AmneziaWGServer(conn, server_id=server_id)
+
 # ---------- Модели ----------
 class LoginRequest(BaseModel):
     username: str
@@ -97,6 +115,7 @@ class TokenResponse(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str
+    user_id: int
 
 class ExpiryDateRequest(BaseModel):
     expiry_date: Optional[str] = None
@@ -146,12 +165,30 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
     return {"username": current_user.get("sub"), "role": current_user.get("role")}
 
 @app.get("/api/clients")
-async def get_clients(server: AmneziaWGServer = Depends(get_server)):
-    return await server.get_clients()
+async def get_clients(
+    server: AmneziaWGServer = Depends(get_server),
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user.get("role") == "admin":
+        return await server.get_clients()  # user_id=None
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    return await server.get_clients(user_id=user_data["id"])
 
 @app.post("/api/clients")
-async def create_client(client: ClientCreate, server: AmneziaWGServer = Depends(get_server)):
-    return await server.add_client(client.name)
+async def create_client(
+    client: ClientCreate,
+    server: AmneziaWGServer = Depends(get_server),
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        return await server.add_client(client.name, client.user_id)
+    except Exception as e:
+        if str(e) == "Config limit reached for this user":
+            raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Unexpected error adding client: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/api/clients")
 async def delete_client(
@@ -162,7 +199,7 @@ async def delete_client(
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
     if server_id is None:
-        client = await db.get_client(decoded_key)
+        client = await db.get_client_by_public_key(decoded_key)
         if client:
             server_id = client['server_id']
         else:
@@ -191,15 +228,17 @@ async def get_user_config(public_key: str, server: AmneziaWGServer = Depends(get
 
 @app.get("/api/limits")
 async def get_limits(admin: dict = Depends(get_current_admin)):
-    clients = await db.get_all_clients()
+    clients = await db.get_all_clients_with_user_info()
     result = []
     for c in clients:
         result.append({
             "public_key": c["public_key"],
+            "user_id": c["user_id"],
+            "username": c["username"],
             "name": c["name"],
             "ip": c["ip"],
-            "limit": c["traffic_limit_bytes"],          # было traffic_limit_bytes
-            "used": c["traffic_used_bytes"] or 0,       # было traffic_used_bytes
+            "limit": c["traffic_limit_bytes"],
+            "used": c["traffic_used_bytes"] or 0,
             "expiry_date": c["expiry_date"],
             "is_active": c["is_active"],
             "server_id": c["server_id"],
@@ -216,19 +255,20 @@ async def set_limit(
 ):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    if server_id is None:
-        client = await db.get_client(decoded_key)
-        if client:
-            server_id = client['server_id']
-        else:
-            raise HTTPException(status_code=404, detail="Client not found in database, specify server_id")
-    server = await get_server(server_id=server_id, admin=admin)
-    client_info = await server.get_client_info(decoded_key)
-    if not client_info:
-        raise HTTPException(status_code=404, detail="Client not found in server config")
-    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server_id)
-    await db.set_client_limit(decoded_key, limit_bytes)
-    await server.unblock_client(decoded_key)
+    client = await db.get_client_by_public_key(decoded_key)
+    if not client:
+        if server_id is None:
+            raise HTTPException(status_code=404, detail="Client not found, specify server_id")
+        server = await get_server(server_id=server_id, admin=admin)
+        client_info = await server.get_client_info(decoded_key)
+        if not client_info:
+            raise HTTPException(status_code=404, detail="Client not found in server config")
+        raise HTTPException(status_code=400, detail="Client exists in config but not in DB. Please fetch clients first.")
+    user_id = client['user_id']
+    await db.update_user_limit(user_id, limit_bytes)
+    server_instance = await get_server(server_id=client['server_id'], admin=admin)
+    await db.sync_user_clients_with_limits(user_id, server_instance)
+    
     return {"message": "Limit set"}
 
 @app.post("/api/clients/expiry")
@@ -240,18 +280,19 @@ async def set_client_expiry_endpoint(
 ):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    if server_id is None:
-        client = await db.get_client(decoded_key)
-        if client:
-            server_id = client['server_id']
-        else:
-            raise HTTPException(status_code=404, detail="Client not found in database, specify server_id")
-    server = await get_server(server_id=server_id, admin=admin)
-    client_info = await server.get_client_info(decoded_key)
-    if not client_info:
-        raise HTTPException(status_code=404, detail="Client not found in server config")
-    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server_id)
-    await db.set_client_expiry(decoded_key, expiry.expiry_date)
+    client = await db.get_client_by_public_key(decoded_key)
+    if not client:
+        if server_id is None:
+            raise HTTPException(status_code=404, detail="Client not found, specify server_id")
+        server = await get_server(server_id=server_id, admin=admin)
+        client_info = await server.get_client_info(decoded_key)
+        if not client_info:
+            raise HTTPException(status_code=404, detail="Client not found in server config")
+        raise HTTPException(status_code=400, detail="Client exists in config but not in DB. Please fetch clients first.")
+    user_id = client['user_id']
+    await db.update_user_expiry(user_id, expiry.expiry_date)
+    server_instance = await get_server(server_id=client['server_id'], admin=admin)
+    await db.sync_user_clients_with_limits(user_id, server_instance)
     return {"message": "Expiry date set"}
 
 @app.post("/api/clients/{public_key}/activate")
@@ -298,6 +339,74 @@ async def update_user_endpoint(user_id: int, user: UserUpdate, admin: dict = Dep
 async def delete_user_endpoint(user_id: int, admin: dict = Depends(get_current_admin)):
     await db.delete_user(user_id)
     return {"message": "User deleted"}
+
+@app.get("/api/user/clients")
+async def get_my_clients(
+    current_user: dict = Depends(get_current_user),
+    server_id: Optional[int] = None
+):
+    """Возвращает клиентов текущего пользователя. Можно фильтровать по server_id."""
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_id = user_data["id"]
+    if server_id:
+        server = await get_server(server_id=server_id, admin=None)
+        clients = await server.get_clients(user_id=user_id)
+    else:
+        servers = await db.get_all_servers()
+        all_clients = []
+        for srv in servers:
+            if not srv['is_active']:
+                continue
+            server = await get_server_public(server_id=srv['id'])
+            clients = await server.get_clients(user_id=user_id)
+            all_clients.extend(clients)
+        clients = all_clients
+    return clients
+
+@app.post("/api/user/clients")
+async def create_my_client(
+    client: ClientCreate,
+    server_id: int = 1,
+    current_user: dict = Depends(get_current_user)
+):
+    """Создаёт нового клиента для текущего пользователя на указанном сервере."""
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_id = user_data["id"]
+    if not await db.can_create_config(user_id):
+        raise HTTPException(status_code=400, detail="Config limit reached")
+    server = await get_server_public(server_id)
+    return await server.add_client(client.name, user_id)
+
+@app.delete("/api/user/clients/{client_id}")
+async def delete_my_client(
+    client_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Удаляет (деактивирует) клиента текущего пользователя по ID."""
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    client = await db.get_client_by_id(client_id)
+    if not client or client['user_id'] != user_data["id"]:
+        raise HTTPException(status_code=404, detail="Client not found")
+    server = await get_server_public(client['server_id'])
+    await server.delete_client(client['public_key'])
+    return {"message": "Client deleted"}
+
+@app.get("/api/user/traffic")
+async def get_my_traffic(
+    current_user: dict = Depends(get_current_user),
+    days: int = 30
+):
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    stats = await db.get_user_traffic_stats(user_data["id"], days)
+    return stats
 
 # ---------- Управление серверами ----------
 @app.get("/api/servers")

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from connection import Connection, LocalConnection, SSHConnection
 import awg_utils
-from database import get_client, create_client, update_traffic_usage, get_all_clients
+from database import update_traffic_usage, get_all_clients
 import database
 from logger import logger
 
@@ -48,11 +48,14 @@ class AmneziaWGServer:
         await self.conn.run_command("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         logger.debug("awg syncconf executed")
 
-    async def get_clients(self) -> List[Dict]:
-        """Возвращает список клиентов с именами (из clientsTable) и синхронизирует с БД."""
+    async def get_clients(self, user_id: Optional[int] = None) -> List[Dict]:
+        """
+        Возвращает список клиентов.
+        Если user_id указан — только клиенты этого пользователя.
+        Если user_id не указан (None) — все клиенты (для админа).
+        """
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
-
         table_json = await self.conn.run_command("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             import json
@@ -62,25 +65,48 @@ class AmneziaWGServer:
         except Exception as e:
             logger.warning(f"Failed to parse clientsTable: {e}")
             names = {}
-
         result = []
         for i, peer in enumerate(peers, 1):
             pub_key = peer.get('public_key', '')
+            client_info = await database.get_client_by_public_key(pub_key)
+            if user_id is not None and (not client_info or client_info['user_id'] != user_id):
+                continue
             name = names.get(pub_key, f"Client {i}")
             ip = peer.get('ip', '')
-            result.append({
+            client_data = {
+                'id': client_info['id'] if client_info else None,
                 'name': name,
                 'public_key': pub_key,
-                'ip': ip
-            })
-            # Сохраняем или обновляем в БД
-            await database.upsert_client(pub_key, name, ip, self.server_id)
-        logger.debug(f"get_clients returned {len(result)} clients")
+                'ip': ip,
+                'server_id': self.server_id,
+                'server_name': await self._get_server_name(),
+                'user_id': client_info['user_id'] if client_info else None,
+            }
+            result.append(client_data)
+            if not client_info:
+                logger.debug(f"Client {pub_key[:8]}... not in DB, creating with default user_id=1")
+                await database.create_client_for_user(
+                    user_id=1,
+                    public_key=pub_key,
+                    name=name,
+                    ip=ip,
+                    private_key="",
+                    server_id=self.server_id
+                )
+        
+        logger.debug(f"get_clients returned {len(result)} clients (filtered by user_id={user_id})")
         return result
 
-    async def add_client(self, name: str) -> Dict:
+    async def _get_server_name(self) -> str:
+        """Возвращает имя сервера"""
+        server_data = await database.get_server(self.server_id)
+        return server_data['name'] if server_data else f"Server {self.server_id}"
+
+    async def add_client(self, name: str, user_id: int) -> Dict:
         """Добавляет нового клиента с указанным именем."""
-        logger.info(f"Adding new client with name '{name}' on server {self.server_id}")
+        logger.info(f"Adding new client with name '{name}' for user {user_id} on server {self.server_id}")
+        if not await database.can_create_config(user_id):
+            raise ValueError("Config limit reached for this user")
         private_key = (await self.conn.run_command("awg genkey")).strip()
         public_key = (await self.conn.run_command(f"echo '{private_key}' | awg pubkey")).strip()
         if not public_key:
@@ -90,7 +116,7 @@ class AmneziaWGServer:
 
         config = await self._read_config()
         next_ip = self._get_next_ip(config)
-
+        
         peer_section = f"""
 [Peer]
 PublicKey = {public_key}
@@ -102,8 +128,14 @@ AllowedIPs = {next_ip}
             raise Exception("Failed to write config file")
         await self._syncconf()
 
-        await self._update_clients_table(public_key, name, next_ip)
-        await create_client(public_key, name, next_ip, private_key, self.server_id)
+        await database.create_client_for_user(
+            user_id=user_id,
+            public_key=public_key,
+            name=name,
+            ip=next_ip,
+            private_key=private_key,
+            server_id=self.server_id
+        )
 
         client_config = await self.get_client_config(public_key)
         normalized = self.normalize_config(new_config)
@@ -121,13 +153,18 @@ AllowedIPs = {next_ip}
     async def delete_client(self, public_key: str):
         """Удаляет клиента по публичному ключу."""
         logger.info(f"Deleting client {public_key[:8]}...")
+        client = await database.get_client_by_public_key(public_key)
+        if client:
+            client_id = client['id']
+            await database.soft_delete_client(client_id)
+        else:
+            logger.warning(f"Client {public_key[:8]} not found in DB, will remove only from config and clientsTable")
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
         new_peers = [p for p in peers if p.get('public_key') != public_key]
         if len(new_peers) == len(peers):
             logger.warning(f"Client {public_key[:8]}... not found, nothing to delete")
             return
-
         interface_part = config.split('[Peer]')[0]
         new_config = interface_part
         for peer in new_peers:
@@ -137,14 +174,13 @@ AllowedIPs = {next_ip}
             if 'ip' in peer:
                 peer_block += f"AllowedIPs = {peer['ip']}\n"
             new_config += peer_block
-
         normalized = self.normalize_config(new_config)
         if not await self._write_config(normalized):
             raise Exception("Failed to write config")
         await self._syncconf()
-
         await self._remove_from_clients_table(public_key)
         await self.conn.run_command(f"rm -f /opt/amnezia/client_configs/{public_key}.conf")
+        
         logger.info(f"Client {public_key[:8]}... deleted")
 
     def normalize_config(self, config: str) -> str:
@@ -205,13 +241,20 @@ AllowedIPs = {next_ip}
         client_ip = peer['ip']
         psk = peer.get('psk', '')
 
-        client_data = await get_client(public_key)
+        client_data = await database.get_client_by_public_key(public_key)
         if not client_data or not client_data.get('private_key'):
             saved = await self.conn.run_command(f"cat /opt/amnezia/client_configs/{public_key}.conf 2>/dev/null || true")
             priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', saved)
             if priv_match:
                 private_key = priv_match.group(1)
-                create_client(public_key, '', client_ip, private_key, self.server_id)
+                await database.create_client_for_user(
+                    user_id=1,
+                    public_key=public_key,
+                    name='',
+                    ip=client_ip,
+                    private_key=private_key,
+                    server_id=self.server_id
+                )
                 logger.debug(f"Recovered private key from saved config for {public_key[:8]}...")
             else:
                 logger.error(f"Private key not found for client {public_key[:8]}...")
@@ -300,7 +343,7 @@ AllowedIPs = {next_ip}
 
     async def sync_iptables_with_db(self):
         """Синхронизирует правила iptables с состоянием is_active в БД."""
-        clients = await get_all_clients(server_id=self.server_id)
+        clients = await database.get_server_clients(self.server_id)
         for client in clients:
             if client['is_active']:
                 await self.unblock_client(client['public_key'])
@@ -311,7 +354,7 @@ AllowedIPs = {next_ip}
     async def generate_amnezia_vpn_link(self, public_key: str) -> str:
         """Генерирует AmneziaVPN-ссылку для клиента."""
         logger.debug(f"Generating Amnezia link for {public_key[:8]}...")
-        client_data = await get_client(public_key)
+        client_data = await database.get_client_by_public_key(public_key)
         if not client_data:
             raise Exception("Client not found")
 
