@@ -155,7 +155,6 @@ AllowedIPs = {next_ip}
             else:
                 result.append(line)
                 prev_empty = False
-        # Убираем пустую строку в конце, если есть
         if result and result[-1] == '':
             result.pop()
         return '\n'.join(result)
@@ -168,7 +167,6 @@ AllowedIPs = {next_ip}
         if not peer:
             return None
 
-        # Получаем имя из clientsTable
         table_json = await self.conn.run_command("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             import json
@@ -290,7 +288,6 @@ AllowedIPs = {next_ip}
         if not ip:
             logger.warning(f"Cannot unblock {public_key[:8]}... IP not found")
             return False
-        # Попытаемся удалить правила, даже если их нет – команда не упадёт из-за || true
         out1 = await self.conn.run_command(f"iptables -D FORWARD -s {ip} -j DROP 2>&1 || true")
         out2 = await self.conn.run_command(f"iptables -D FORWARD -d {ip} -j DROP 2>&1 || true")
         logger.info(f"Unblocked client {public_key[:8]}... (IP {ip}). Output: {out1.strip()} / {out2.strip()}")
@@ -343,6 +340,18 @@ AllowedIPs = {next_ip}
         )
         logger.debug(f"Amnezia link generated for {public_key[:8]}...")
         return link
+    
+    async def setup_server_stream(self, sudo_password: Optional[str] = None):
+        """Обёртка для вызова функции установки из отдельного модуля."""
+        from server_setup import setup_server_stream as run_setup
+        if isinstance(self.conn, LocalConnection):
+            yield {"type": "error", "message": "Setup is only for remote servers"}
+            return
+        if not isinstance(self.conn, SSHConnection):
+            yield {"type": "error", "message": "Invalid connection type"}
+            return
+        async for update in run_setup(self.conn, sudo_password):
+            yield update
 
     # ---------- Вспомогательные методы ----------
     async def _get_server_ip(self) -> str:

@@ -25,6 +25,7 @@ def setup_logger():
 
     # Устанавливаем уровень для библиотек (опционально)
     logging.getLogger("asyncssh").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
     return root_logger
 
