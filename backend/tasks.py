@@ -8,11 +8,12 @@ async def collect_stats_periodically(interval: int = 60):
     while True:
         logger.debug("Starting periodic stats collection")
         try:
-            servers = await db.get_all_servers()
+            await db.check_all_limits()
+            servers = await db.get_all_servers_full()
             for srv in servers:
                 if not srv['is_active']:
                     continue
-                logger.debug(f"Collecting stats for server {srv['id']}")
+                logger.debug(f"Collecting stats for server {srv['id']} ({srv['name']})")
                 try:
                     if srv['auth_type'] == 'local':
                         conn = LocalConnection()
@@ -22,13 +23,14 @@ async def collect_stats_periodically(interval: int = 60):
                             port=srv['port'],
                             username=srv['username'],
                             password=srv.get('password'),
-                            private_key=srv.get('private_key')
+                            private_key=srv.get('private_key'),
+                            sudo_password=srv.get('password')
                         )
                     server = AmneziaWGServer(conn, server_id=srv['id'])
                     await server.collect_traffic_stats()
                     await conn.close()
                 except Exception as e:
-                    logger.error(f"Stats collection failed for server {srv['id']}: {e}")
+                    logger.error(f"Stats collection failed for server {srv['id']}: {e}", exc_info=True)
         except Exception as e:
-            logger.error(f"Periodic stats collection error: {e}")
+            logger.error(f"Periodic stats collection error: {e}", exc_info=True)
         await asyncio.sleep(interval)

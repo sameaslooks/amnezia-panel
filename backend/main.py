@@ -17,6 +17,7 @@ from tasks import collect_stats_periodically
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await asyncio.sleep(5)
     task = asyncio.create_task(collect_stats_periodically())
     yield
     task.cancel()
@@ -153,12 +154,32 @@ async def create_client(client: ClientCreate, server: AmneziaWGServer = Depends(
     return await server.add_client(client.name)
 
 @app.delete("/api/clients")
-async def delete_client(public_key: str, server: AmneziaWGServer = Depends(get_server)):
-    await server.delete_client(public_key)
+async def delete_client(
+    public_key: str, 
+    server_id: Optional[int] = None,
+    admin: dict = Depends(get_current_admin)
+):
+    from urllib.parse import unquote
+    decoded_key = unquote(public_key)
+    if server_id is None:
+        client = await db.get_client(decoded_key)
+        if client:
+            server_id = client['server_id']
+        else:
+            raise HTTPException(status_code=404, detail="Client not found in database, specify server_id")
+    server = await get_server(server_id=server_id, admin=admin)
+    await server.delete_client(decoded_key)
     return {"message": "Client deleted successfully"}
 
 @app.get("/api/traffic")
-async def get_traffic(server: AmneziaWGServer = Depends(get_server)):
+async def get_traffic(
+    server_id: Optional[int] = None,
+    admin: dict = Depends(get_current_admin)
+):
+    if server_id is None:
+        server = await get_server(server_id=1, admin=admin)
+    else:
+        server = await get_server(server_id=server_id, admin=admin)
     return await server.get_traffic()
 
 @app.get("/api/user-config")
@@ -187,32 +208,49 @@ async def get_limits(admin: dict = Depends(get_current_admin)):
     return result
 
 @app.post("/api/limits")
-async def set_limit(public_key: str, limit_bytes: int, server: AmneziaWGServer = Depends(get_server)):
+async def set_limit(
+    public_key: str, 
+    limit_bytes: int, 
+    server_id: Optional[int] = None,
+    admin: dict = Depends(get_current_admin)
+):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    logger.info(f"Received set_limit request for {decoded_key[:8]}... with limit {limit_bytes}")
+    if server_id is None:
+        client = await db.get_client(decoded_key)
+        if client:
+            server_id = client['server_id']
+        else:
+            raise HTTPException(status_code=404, detail="Client not found in database, specify server_id")
+    server = await get_server(server_id=server_id, admin=admin)
     client_info = await server.get_client_info(decoded_key)
     if not client_info:
         raise HTTPException(status_code=404, detail="Client not found in server config")
-    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server.server_id)
+    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server_id)
     await db.set_client_limit(decoded_key, limit_bytes)
     await server.unblock_client(decoded_key)
-    logger.info(f"Client {decoded_key[:8]}... unblocked after setting limit")
     return {"message": "Limit set"}
 
 @app.post("/api/clients/expiry")
 async def set_client_expiry_endpoint(
     public_key: str,
     expiry: ExpiryDateRequest,
-    server: AmneziaWGServer = Depends(get_server)
+    server_id: Optional[int] = None,
+    admin: dict = Depends(get_current_admin)
 ):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
-    logger.info(f"Setting expiry for {decoded_key[:8]}... to {expiry.expiry_date}")
+    if server_id is None:
+        client = await db.get_client(decoded_key)
+        if client:
+            server_id = client['server_id']
+        else:
+            raise HTTPException(status_code=404, detail="Client not found in database, specify server_id")
+    server = await get_server(server_id=server_id, admin=admin)
     client_info = await server.get_client_info(decoded_key)
     if not client_info:
         raise HTTPException(status_code=404, detail="Client not found in server config")
-    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server.server_id)
+    await db.upsert_client(decoded_key, client_info['name'], client_info['ip'], server_id)
     await db.set_client_expiry(decoded_key, expiry.expiry_date)
     return {"message": "Expiry date set"}
 

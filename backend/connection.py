@@ -33,7 +33,7 @@ class LocalConnection(Connection):
         self.container_name = container_name
         logger.debug(f"LocalConnection initialized with container {container_name}")
 
-    async def run_command(self, command: str) -> str:
+    async def run_command(self, command: str, in_container: bool = True) -> str:
         logger.debug(f"Local run: {command}")
         try:
             proc = await asyncio.create_subprocess_exec(
