@@ -116,38 +116,71 @@ class SSHConnection(Connection):
             kwargs['password'] = self.password
             kwargs['client_keys'] = None
             logger.debug("Using password authentication")
-        self._conn = await asyncssh.connect(**kwargs)
-        logger.info("SSH connection established")
+        try:
+            self._conn = await asyncssh.connect(**kwargs)
+            logger.info("SSH connection established")
+        except Exception as e:
+            logger.error(f"SSH connection error: {e}")
+            raise
 
-    async def run_command(self, command: str) -> str:
+    async def run_command(self, command: str, in_container: bool = True) -> str:
         await self._connect()
-        escaped = command.replace('"', '\\"')
-        docker_cmd = f"docker exec amnezia-awg2 bash -c \"{escaped}\""
-        if self.sudo_password:
-            full_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
+        if in_container:
+            escaped = command.replace('"', '\\"')
+            cmd = f"docker exec amnezia-awg2 bash -c \"{escaped}\""
         else:
-            full_cmd = docker_cmd
+            cmd = command
+        if self.sudo_password:
+            full_cmd = f"echo '{self.sudo_password}' | sudo -S {cmd}"
+        else:
+            full_cmd = cmd
         logger.debug(f"SSH run: {full_cmd}")
         result = await self._conn.run(full_cmd)
-        if result.stderr:
-            logger.debug(f"Command stderr: {result.stderr}")
         return result.stdout
 
-    async def write_file(self, path: str, content: str) -> bool:
+    async def write_file(self, path: str, content: str, in_container: bool = True) -> bool:
+        """
+        Записывает содержимое в файл.
+        :param path: путь на удалённой системе
+        :param content: содержимое
+        :param in_container: если True, путь считается внутри контейнера, иначе – на хосте
+        """
         await self._connect()
-        logger.debug(f"SSH write file {path} ({len(content)} bytes)")
+        logger.debug(f"SSH write file {'(container) ' if in_container else '(host) '}{path} ({len(content)} bytes)")
+
+        # Создаём временный локальный файл
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             f.write(content)
             local_path = f.name
+
         remote_tmp = f"/tmp/awg_{os.path.basename(local_path)}"
         try:
+            # Копируем на удалённый сервер во временную папку
             await asyncssh.scp(local_path, (self._conn, remote_tmp))
-            docker_cmd = f"docker cp {remote_tmp} amnezia-awg2:{path}"
-            if self.sudo_password:
-                docker_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
-            result = await self._conn.run(docker_cmd)
+
+            if in_container:
+                # Перемещаем внутрь контейнера
+                docker_cmd = f"docker cp {remote_tmp} amnezia-awg2:{path}"
+                if self.sudo_password:
+                    docker_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
+                result = await self._conn.run(docker_cmd)
+                success = result.returncode == 0
+            else:
+                # На хосте: создаём директорию и перемещаем файл через sudo
+                mkdir_cmd = f"sudo mkdir -p {os.path.dirname(path)}"
+                if self.sudo_password:
+                    mkdir_cmd = f"echo '{self.sudo_password}' | sudo -S {mkdir_cmd}"
+                await self._conn.run(mkdir_cmd)
+
+                mv_cmd = f"sudo mv {remote_tmp} {path}"
+                if self.sudo_password:
+                    mv_cmd = f"echo '{self.sudo_password}' | sudo -S {mv_cmd}"
+                result = await self._conn.run(mv_cmd)
+                success = result.returncode == 0
+
+            # Удаляем временный файл на сервере
             await self._conn.run(f"rm -f {remote_tmp}")
-            success = result.returncode == 0
+
             if success:
                 logger.debug(f"Successfully wrote {path}")
             else:
