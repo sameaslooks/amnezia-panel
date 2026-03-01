@@ -633,6 +633,7 @@
                             };
                         });
                         this.users = users;
+                        await this.fetchTraffic();
                     }
                 } catch (err) {
                     console.error('loadAllData error:', err);
@@ -643,32 +644,46 @@
             async fetchTraffic() {
                 try {
                     const token = this.getToken();
-                    const [trafficRes, limitsRes] = await Promise.all([
-                        fetch('/api/traffic', { headers: { 'Authorization': `Bearer ${token}` } }),
+                    const [limitsRes] = await Promise.all([
                         fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } })
                     ]);
-                    if (trafficRes.ok && limitsRes.ok) {
-                        const trafficData = await trafficRes.json();
-                        const limits = await limitsRes.json();
-                        const limitsMap = {};
-                        limits.forEach(l => limitsMap[l.public_key] = l);
-                        const trafficMap = {};
-                        trafficData.forEach(t => trafficMap[t.public_key] = t);
 
-                        this.clients = this.clients.map(client => {
-                            const t = trafficMap[client.public_key];
-                            const limitData = limitsMap[client.public_key];
-                            return {
-                                ...client,
-                                traffic: t?.transfer || '0 B',
-                                handshake: t?.latest_handshake || 'Never',
-                                used: limitData?.used || client.used,
-                                limit: limitData?.limit,
-                                expiry_date: limitData?.expiry_date,
-                                is_active: limitData ? limitData.is_active === 1 : true
-                            };
-                        });
+                    let limitsMap = {};
+                    if (limitsRes.ok) {
+                        const limits = await limitsRes.json();
+                        limits.forEach(l => limitsMap[l.public_key] = l);
                     }
+
+                    let allTraffic = [];
+                    for (const server of this.servers) {
+                        const url = server.id === 1
+                            ? '/api/traffic'
+                            : `/api/traffic?server_id=${server.id}`;
+                        const trafficRes = await fetch(url, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (trafficRes.ok) {
+                            const serverTraffic = await trafficRes.json();
+                            allTraffic = allTraffic.concat(serverTraffic);
+                        }
+                    }
+
+                    const trafficMap = {};
+                    allTraffic.forEach(t => trafficMap[t.public_key] = t);
+
+                    this.clients = this.clients.map(client => {
+                        const t = trafficMap[client.public_key];
+                        const limitData = limitsMap[client.public_key];
+                        return {
+                            ...client,
+                            traffic: t?.transfer || '0 B',
+                            handshake: t?.latest_handshake || 'Never',
+                            used: limitData?.used || client.used,
+                            limit: limitData?.limit,
+                            expiry_date: limitData?.expiry_date,
+                            is_active: limitData ? limitData.is_active === 1 : true
+                        };
+                    });
                 } catch (err) {
                     console.error('fetchTraffic error:', err);
                 }
