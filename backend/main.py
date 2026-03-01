@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+setup_logger()
+
 app = FastAPI(title="Amnezia Panel", lifespan=lifespan)
 
 # Статика
@@ -349,7 +351,7 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
         data = await websocket.receive_json()
         token = data.get("token")
         if not token:
-            await websocket.send_json({"type": "error", "message": "No token"})
+            await websocket.send_json({"type": "error", "message": "No token provided"})
             await websocket.close()
             return
         payload = decode_token(token)
@@ -357,19 +359,41 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
             await websocket.send_json({"type": "error", "message": "Unauthorized"})
             await websocket.close()
             return
-
         server_data = await db.get_server(server_id)
         if not server_data:
             await websocket.send_json({"type": "error", "message": "Server not found"})
             await websocket.close()
             return
+        sudo_password = server_data.get('password')
+        if server_data['auth_type'] == 'local':
+            await websocket.send_json({"type": "error", "message": "Setup not supported for local server"})
+            await websocket.close()
+            return
+        conn = SSHConnection(
+            host=server_data['host'],
+            port=server_data['port'],
+            username=server_data['username'],
+            password=server_data.get('password'),
+            private_key=server_data.get('private_key'),
+            sudo_password=sudo_password
+        )
+        server = AmneziaWGServer(conn, server_id=server_id)
+        async for update in server.setup_server_stream(sudo_password):
+            await websocket.send_json(update)
 
-        await websocket.send_json({"type": "info", "message": "Setup not yet implemented in refactored code"})
+    except WebSocketDisconnect:
+        logger.info(f"Client disconnected from server {server_id} setup")
     except Exception as e:
         logger.error(f"WebSocket setup error: {e}")
-        await websocket.send_json({"type": "error", "message": str(e)})
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except:
+            pass
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except:
+            pass
 
 # ---------- Статические страницы ----------
 @app.get("/")
