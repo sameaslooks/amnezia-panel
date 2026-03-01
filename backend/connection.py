@@ -132,9 +132,10 @@ class SSHConnection(Connection):
             cmd = command
         if self.sudo_password:
             full_cmd = f"echo '{self.sudo_password}' | sudo -S {cmd}"
+            logger.debug(f"SSH run with sudo: {cmd}")
         else:
             full_cmd = cmd
-        logger.debug(f"SSH run: {full_cmd}")
+            logger.debug(f"SSH run: {full_cmd}")
         result = await self._conn.run(full_cmd)
         return result.stdout
 
