@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <strong>✨ Open-source панель управления для Docker-контейнера с запущенным amnezia-awg2</strong><br>
-  <em>Легко. Быстро. Для коммерции и личного использования.</em>
+  <strong>✨ Open-source панель управления для протокола AmneziaWG2</strong><br>
+  <em>Поддержка одного или нескольких серверов. Для коммерции и личного использования.</em>
 </p>
 
 <p align="center">
@@ -27,8 +27,9 @@
 
 <p>
   <strong>Amnezia VPN Panel</strong> — это готовая к использованию веб-панель для управления 
-  Docker-контейнером <code>amnezia-awg2</code>. Создана для тех, кто хочет предоставлять 
+  Docker-контейнерами <code>amnezia-awg2</code>. Создана для тех, кто хочет предоставлять 
   VPN-доступ своим пользователям: от небольших команд до коммерческих проектов.
+  Поддерживает как локальный Docker-контейнер, так и удалённые серверы по SSH.
 </p>
 
 <table>
@@ -38,7 +39,7 @@
   </tr>
   <tr>
     <td>✅ <strong>Актуальность</strong></td>
-    <td>Поддерживает текущую версию AmneziaWG (февраль 2026)</td>
+    <td>Поддерживает текущую версию AmneziaWG (март 2026)</td>
   </tr>
   <tr>
     <td>✅ <strong>Open Source</strong></td>
@@ -65,29 +66,29 @@
   </thead>
   <tbody>
     <tr>
+      <td><strong>Мультисерверность</strong></td>
+      <td>Добавление удалённых серверов, установка через SSH (пароль/ключ), мониторинг статуса, управление клиентами на всех серверах</td>
+    </tr>
+    <tr>
       <td><strong>Лимиты трафика и даты</strong></td>
       <td>Динамическая блокировка/разблокировка при превышении лимита трафика или истечении срока действия ключа</td>
     </tr>
     <tr>
-      <td><strong>AmneziaWG-конфиги</strong></td>
-      <td>Генерация конфигураций с поддержкой обфускации (Jc, Jmin, H1, I1 и др.)</td>
-    </tr>
-    <tr>
-      <td><strong>vpn:// ссылки</strong></td>
-      <td>Генерация ссылок для быстрого импорта в AmneziaVPN</td>
-    </tr>
-    <tr>
-      <td><strong>QR-коды</strong></td>
-      <td>Генерация QR-кодов для конфигураций клиентов</td>
-    </tr>
-    <tr>
       <td><strong>Статистика использования</strong></td>
-      <td>Сбор и отображение статистики RX/TX с хранением в БД</td>
+      <td>Сбор и отображение статистики RX/TX с хранением в БД, время последнего handshake</td>
+    </tr>
+    <tr>
+      <td><strong>AmneziaWG-конфиги</strong></td>
+      <td>Генерация конфигураций с поддержкой обфускации (Jc, Jmin, Jmax, S1–S4, H1–H4, I1–I5)</td>
+    </tr>
+    <tr>
+      <td><strong>vpn:// ссылки для AmneziaVPN</strong></td>
+      <td>Генерация ссылок для быстрого импорта в AmneziaVPN</td>
     </tr>
   </tbody>
 </table>
 
-<h3>🟠 Частично реализовано</h3>
+<h3>🟠 Частично реализовано / В разработке</h3>
 
 <table>
   <thead>
@@ -99,14 +100,24 @@
   </thead>
   <tbody>
     <tr>
-      <td><strong>Управление пользователями</strong></td>
-      <td>🟠 В доработке</td>
-      <td>Пользовательская панель пока не проработана, базовая админка работает</td>
+      <td><strong>Пользовательская панель</strong></td>
+      <td>🟠 Требуется доработка</td>
+      <td>Весь backend актуален для реализации frontend для пользователя</td>
     </tr>
     <tr>
-      <td><strong>Мультисерверность</strong></td>
-      <td>🟠 В разработке</td>
-      <td>Добавление удалённых серверов, установка через SSH (пароль/ключ), мониторинг статуса</td>
+      <td><strong>Подробная статистика</strong></td>
+      <td>🟠 В планах</td>
+      <td>Графики, детализация по устройствам</td>
+    </tr>
+    <tr>
+      <td><strong>QR-коды для AmneziaVPN</strong></td>
+      <td>🟠 В планах</td>
+      <td>Генерация QR-кодов для конфигураций клиентов</td>
+    </tr>
+    <tr>
+      <td><strong>Управление группой серверов</strong></td>
+      <td>🟠 В планах</td>
+      <td>Автоматическое развёртывание через SSH, единое управление, Prometheus-статистика</td>
     </tr>
   </tbody>
 </table>
@@ -133,9 +144,9 @@
       <td>Уведомления об окончании подписки, лимитах трафика</td>
     </tr>
     <tr>
-      <td><strong>Интеграция с биллингом</strong></td>
+      <td><strong>Интеграция с биллингом через API</strong></td>
       <td>По запросу</td>
-      <td>Автоматическое управление доступом посредством внешних биллинг-систем</td>
+      <td>Автоматическое продление доступа с внешними биллинг-системами</td>
     </tr>
     <tr>
       <td><strong>Смена протоколов на лету</strong></td>
@@ -151,11 +162,18 @@
 
 <pre><code>git clone https://github.com/sameaslooks/amnezia-panel
 cd amnezia-panel
+cp nginx.conf.example nginx.conf
+cp .env.example .env
+cp docker-compose.yml.example docker-compose.yml
+
+vi .env
+
 docker compose up -d
 </code></pre>
 
 <p>
-  <strong>Готово!</strong> Панель будет доступна по адресу <code>http://&lt;ip-адрес-сервера&gt;:8000</code><br>
+  <strong>Готово!</strong> Панель будет доступна по адресу <code>https://&lt;ваш-домен.com&gt;</code> или <code>http://&lt;ip-адрес-сервера&gt;:80</code> в зависимости от настроек.<br>
+  <em>Для запуска требуется наличие сертификатов формата Let's Encrypt в <code>/etc/letsencrypt</code>! Для отключения см. <code>nginx.conf.example</code>.</em><br><br>
   <em>Логин по умолчанию: admin / admin</em>
 </p>
 
@@ -175,17 +193,18 @@ docker compose up -d
 amnezia-panel/
 ├── backend/         # Python API (FastAPI)
 ├── frontend/        # HTML/JS интерфейс (Alpine.js)
-├── docker/          # Конфигурации Docker
-└── docs/            # Документация
+└── bot              # Telegram-бот (PythonTelegramBot)
 </pre>
 
 <p>
   <strong>Технологии:</strong>
 </p>
 <ul>
-  <li>Backend: Python + FastAPI + asyncssh + SQLite</li>
-  <li>Frontend: HTML + Alpine.js + TailwindCSS</li>
+  <li>Backend: Python + FastAPI + asyncssh + SQLite + aiosqlite</li>
+  <li>Frontend: HTML + Alpine.js + TailwindCSS + QRCode.js</li>
+  <li>Telegram-бот: PythonTelegramBot
   <li>Контейнер: Docker + docker-compose</li>
+  <li>Аутентификация: JWT + bcrypt</li>
 </ul>
 
 <hr>
@@ -200,7 +219,7 @@ amnezia-panel/
   <li>🐛 Нашли баг? Создайте <a href="#">Issue!</a></li>
   <li>💡 Есть предложение? Напишите в <a href="#">Issues!</a></li>
   <li>🔧 Хотите помочь с кодом? Создавайте <a href="#">Pull Request!</a></li>
-  <li>Всегда рад дополнить своё решение и помочь с вопросами!:)</li>
+  <li>Всегда рад дополнить своё решение и помочь с вопросами! :)</li>
 </ul>
 
 <hr>

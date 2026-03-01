@@ -26,7 +26,7 @@ class AmneziaWGServer:
         return config
 
     async def _write_config(self, config: str) -> bool:
-        """Записывает конфигурационный файл сервера."""
+        """Записывает конфигурационный файл сервера, гарантируя завершающий перевод строки."""
         filtered_lines = []
         for line in config.splitlines():
             stripped = line.strip()
@@ -34,6 +34,8 @@ class AmneziaWGServer:
                 continue
             filtered_lines.append(line)
         filtered_config = '\n'.join(filtered_lines)
+        if filtered_config and not filtered_config.endswith('\n'):
+            filtered_config += '\n'
         success = await self.conn.write_file("/opt/amnezia/awg/awg0.conf", filtered_config)
         if success:
             logger.debug("Config written successfully")
@@ -47,7 +49,7 @@ class AmneziaWGServer:
         logger.debug("awg syncconf executed")
 
     async def get_clients(self) -> List[Dict]:
-        """Возвращает список клиентов с именами (из clientsTable)."""
+        """Возвращает список клиентов с именами (из clientsTable) и синхронизирует с БД."""
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
 
@@ -56,7 +58,7 @@ class AmneziaWGServer:
             import json
             clients_data = json.loads(table_json)
             names = {item['clientId']: item.get('userData', {}).get('clientName', 'Unknown')
-                     for item in clients_data if 'clientId' in item}
+                    for item in clients_data if 'clientId' in item}
         except Exception as e:
             logger.warning(f"Failed to parse clientsTable: {e}")
             names = {}
@@ -65,11 +67,14 @@ class AmneziaWGServer:
         for i, peer in enumerate(peers, 1):
             pub_key = peer.get('public_key', '')
             name = names.get(pub_key, f"Client {i}")
+            ip = peer.get('ip', '')
             result.append({
                 'name': name,
                 'public_key': pub_key,
-                'ip': peer.get('ip', '')
+                'ip': ip
             })
+            # Сохраняем или обновляем в БД
+            await database.upsert_client(pub_key, name, ip, self.server_id)
         logger.debug(f"get_clients returned {len(result)} clients")
         return result
 

@@ -328,6 +328,18 @@ async def get_all_servers() -> List[Dict]:
         rows = await cursor.fetchall()
         logger.debug(f"Fetched {len(rows)} servers")
         return [dict(row) for row in rows]
+    
+async def get_all_servers_full() -> List[Dict]:
+    """Возвращает все серверы с полной информацией, включая password и private_key (только для внутреннего использования)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT id, name, host, port, username, auth_type, password, private_key, is_active, created_at
+            FROM servers ORDER BY id ASC
+        ''')
+        rows = await cursor.fetchall()
+        logger.debug(f"Fetched {len(rows)} servers (full)")
+        return [dict(row) for row in rows]
 
 async def add_server(server_data: dict) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -426,3 +438,28 @@ async def check_all_limits(server_instance=None) -> Dict:
         'expiry_deactivated': expiry,
         'total_deactivated': total
     }
+
+async def _force_init():
+    """Принудительная инициализация БД при импорте модуля"""
+    try:
+        # Проверяем существование таблиц
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='servers'"
+            )
+            if not await cursor.fetchone():
+                logger.info("Auto-initializing database on module import")
+                await init_db()
+            else:
+                logger.debug("Database already initialized")
+    except Exception as e:
+        logger.error(f"Auto-init failed: {e}, trying full init")
+        await init_db()
+
+
+import asyncio
+try:
+    loop = asyncio.get_running_loop()
+    loop.create_task(_force_init())
+except RuntimeError:
+    asyncio.run(_force_init())
