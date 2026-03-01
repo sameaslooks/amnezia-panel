@@ -9,15 +9,14 @@
 </p>
 
 <p align="center">
-  <strong>✨ Open-source панель управления для Docker-контейнера с запущенным amnezia-awg2</strong><br>
-  <em>Легко. Быстро. Для коммерции и личного использования.</em>
+  <strong>✨ Open-source панель управления для протокола AmneziaWG2</strong><br>
+  <em>Поддержка одного или нескольких серверов. Для коммерции и личного использования.</em>
 </p>
 
 <p align="center">
   <a href="#-о-проекте">О проекте</a> •
   <a href="#-возможности">Возможности</a> •
   <a href="#-быстрый-старт">Быстрый старт</a> •
-  <a href="#-дорожная-карта">Дорожная карта</a> •
   <a href="#-архитектура">Архитектура</a> •
   <a href="#-лицензия">Лицензия</a>
 </p>
@@ -28,8 +27,9 @@
 
 <p>
   <strong>Amnezia VPN Panel</strong> — это готовая к использованию веб-панель для управления 
-  Docker-контейнером <code>amnezia-awg2</code>. Создана для тех, кто хочет предоставлять 
+  Docker-контейнерами <code>amnezia-awg2</code>. Создана для тех, кто хочет предоставлять 
   VPN-доступ своим пользователям: от небольших команд до коммерческих проектов.
+  Поддерживает как локальный Docker-контейнер, так и удалённые серверы по SSH.
 </p>
 
 <table>
@@ -39,7 +39,7 @@
   </tr>
   <tr>
     <td>✅ <strong>Актуальность</strong></td>
-    <td>Поддерживает текущую версию AmneziaWG (февраль 2026)</td>
+    <td>Поддерживает текущую версию AmneziaWG (март 2026)</td>
   </tr>
   <tr>
     <td>✅ <strong>Open Source</strong></td>
@@ -48,7 +48,7 @@
 </table>
 
 <p>
-  ❗❗❗ <strong>Открыт к Pull Request и вопросам/запросам в Issues!</strong>
+  ❗ <strong>Открыт к Pull Request и вопросам/запросам в Issues!</strong>
 </p>
 
 <hr>
@@ -66,13 +66,29 @@
   </thead>
   <tbody>
     <tr>
-      <td><strong>Лимиты трафика</strong></td>
-      <td>Динамическая блокировка/разблокировка при превышении или отсутствии лимита</td>
+      <td><strong>Мультисерверность</strong></td>
+      <td>Добавление удалённых серверов, установка через SSH (пароль/ключ), мониторинг статуса, управление клиентами на всех серверах</td>
+    </tr>
+    <tr>
+      <td><strong>Лимиты трафика и даты</strong></td>
+      <td>Динамическая блокировка/разблокировка при превышении лимита трафика или истечении срока действия ключа</td>
+    </tr>
+    <tr>
+      <td><strong>Статистика использования</strong></td>
+      <td>Сбор и отображение статистики RX/TX с хранением в БД, время последнего handshake</td>
+    </tr>
+    <tr>
+      <td><strong>AmneziaWG-конфиги</strong></td>
+      <td>Генерация конфигураций с поддержкой обфускации (Jc, Jmin, Jmax, S1–S4, H1–H4, I1–I5)</td>
+    </tr>
+    <tr>
+      <td><strong>vpn:// ссылки для AmneziaVPN</strong></td>
+      <td>Генерация ссылок для быстрого импорта в AmneziaVPN</td>
     </tr>
   </tbody>
 </table>
 
-<h3>🟠 Частично реализовано</h3>
+<h3>🟠 Частично реализовано / В разработке</h3>
 
 <table>
   <thead>
@@ -84,29 +100,24 @@
   </thead>
   <tbody>
     <tr>
-      <td><strong>Управление пользователями</strong></td>
-      <td>Частично</td>
-      <td>Создание, массовое удаление/создание, просмотр конфигов и базовой статистики</td>
+      <td><strong>Пользовательская панель</strong></td>
+      <td>🟠 Требуется доработка</td>
+      <td>Весь backend актуален для реализации frontend для пользователя</td>
     </tr>
     <tr>
-      <td><strong>AmneziaWG-конфиги</strong></td>
-      <td>Частично</td>
-      <td>Выдача конфигураций, QR-коды для AWG в проработке</td>
-    </tr>
-    <tr>
-      <td><strong>vpn:// ссылки для AmneziaVPN</strong></td>
-      <td>Частично</td>
-      <td>Генерация ссылок для импорта в AmneziaVPN (в набросках, требуется интеграция)</td>
+      <td><strong>Подробная статистика</strong></td>
+      <td>🟠 В планах</td>
+      <td>Графики, детализация по устройствам</td>
     </tr>
     <tr>
       <td><strong>QR-коды для AmneziaVPN</strong></td>
-      <td>Не реализовано</td>
-      <td>Требуется исследование механизма создания</td>
+      <td>🟠 В планах</td>
+      <td>Генерация QR-кодов для конфигураций клиентов</td>
     </tr>
     <tr>
-      <td><strong>Статистика использования</strong></td>
-      <td>Частично</td>
-      <td>Базовая текстовая статистика RX/TX доступна, графики в разработке</td>
+      <td><strong>Управление группой серверов</strong></td>
+      <td>🟠 В планах</td>
+      <td>Автоматическое развёртывание через SSH, единое управление, Prometheus-статистика</td>
     </tr>
   </tbody>
 </table>
@@ -123,19 +134,9 @@
   </thead>
   <tbody>
     <tr>
-      <td><strong>Лимитированный датированный доступ</strong></td>
-      <td>01.03.2026</td>
-      <td>Недельные, месячные, годовые подписки для бизнеса</td>
-    </tr>
-    <tr>
       <td><strong>Подробная статистика</strong></td>
       <td>20.03.2026</td>
       <td>Графики, детализация по устройствам, привязанным к аккаунту</td>
-    </tr>
-    <tr>
-      <td><strong>Управление группой серверов</strong></td>
-      <td>01.04.2026</td>
-      <td>Автоматическое развёртывание через SSH, единое управление, Prometheus-статистика</td>
     </tr>
     <tr>
       <td><strong>Telegram-бот и email-уведомления</strong></td>
@@ -157,22 +158,27 @@
 
 <hr>
 
-<h2>⚡ Быстрый старт (Docker)</h2>
+<h2>⚡ Быстрый старт</h2>
 
-<pre><code># Клонируем репозиторий
-git clone https://github.com/sameaslooks/amnezia-panel
+<pre><code>git clone https://github.com/sameaslooks/amnezia-panel
 cd amnezia-panel
+cp nginx.conf.example nginx.conf
+cp .env.example .env
+cp docker-compose.yml.example docker-compose.yml
 
-# Запускаем контейнеры
+vi .env
+
 docker compose up -d
 </code></pre>
 
 <p>
-  <strong>Готово!</strong> Панель будет доступна по адресу <code>http://&lt;ip-адрес-сервера&gt;:8000</code>
+  <strong>Готово!</strong> Панель будет доступна по адресу <code>https://&lt;ваш-домен.com&gt;</code> или <code>http://&lt;ip-адрес-сервера&gt;:80</code> в зависимости от настроек.<br>
+  <em>Для запуска требуется наличие сертификатов формата Let's Encrypt в <code>/etc/letsencrypt</code>! Для отключения см. <code>nginx.conf.example</code>.</em><br><br>
+  <em>Логин по умолчанию: admin / admin</em>
 </p>
 
 <p>
-  <em>Примечание: проект позиционируется как Docker-контейнер, но теоретически возможен запуск и через Python напрямую.</em>
+  <em>Примечание: проект позиционируется как Docker-контейнер, но возможен запуск и через Python напрямую.</em>
 </p>
 
 <hr>
@@ -185,11 +191,21 @@ docker compose up -d
 
 <pre>
 amnezia-panel/
-├── backend/         # Python API
-├── frontend/        # HTML/JS интерфейс
-├── docker/          # Конфигурации Docker
-└── docs/            # Документация
+├── backend/         # Python API (FastAPI)
+├── frontend/        # HTML/JS интерфейс (Alpine.js)
+└── bot              # Telegram-бот (PythonTelegramBot)
 </pre>
+
+<p>
+  <strong>Технологии:</strong>
+</p>
+<ul>
+  <li>Backend: Python + FastAPI + asyncssh + SQLite + aiosqlite</li>
+  <li>Frontend: HTML + Alpine.js + TailwindCSS + QRCode.js</li>
+  <li>Telegram-бот: PythonTelegramBot
+  <li>Контейнер: Docker + docker-compose</li>
+  <li>Аутентификация: JWT + bcrypt</li>
+</ul>
 
 <hr>
 
@@ -203,7 +219,7 @@ amnezia-panel/
   <li>🐛 Нашли баг? Создайте <a href="#">Issue!</a></li>
   <li>💡 Есть предложение? Напишите в <a href="#">Issues!</a></li>
   <li>🔧 Хотите помочь с кодом? Создавайте <a href="#">Pull Request!</a></li>
-  <li>Всегда рад дополнить своё решение и помочь с вопросами!:)</li>
+  <li>Всегда рад дополнить своё решение и помочь с вопросами! :)</li>
 </ul>
 
 <hr>

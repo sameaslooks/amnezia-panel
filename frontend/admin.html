@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amnezia Panel - Admin</title>
-	<link href="/static/tailwind.min.css" rel="stylesheet">
+    <link href="/static/tailwind.min.css" rel="stylesheet">
     <script src="/static/alpine.min.js" defer></script>
     <script src="/static/qrcode.min.js"></script>
 </head>
@@ -13,24 +13,29 @@
         <!-- Header -->
         <nav class="bg-white shadow-lg">
             <div class="max-w-7xl mx-auto px-4">
-                <div class="flex justify-between items-center">
-                    <h1 class="text-xl font-bold py-4">Amnezia VPN Admin</h1>
+                <div class="flex justify-between items-center h-16">
+                    <div class="flex items-center space-x-4">
+                        <h1 class="text-xl font-bold">Amnezia VPN Admin</h1>
+                        <div class="flex space-x-2">
+                            <button @click="activeTab = 'servers'"
+                                    :class="activeTab === 'servers' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                    class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                Servers
+                            </button>
+                            <button @click="activeTab = 'clients'"
+                                    :class="activeTab === 'clients' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                    class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                VPN Clients
+                            </button>
+                            <button @click="activeTab = 'users'"
+                                    :class="activeTab === 'users' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+                                    class="px-4 py-2 rounded-md text-sm font-medium transition">
+                                Users
+                            </button>
+                        </div>
+                    </div>
                     <button @click="logout" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
                         Logout
-                    </button>
-                </div>
-                
-                <!-- Tabs -->
-                <div class="flex border-b">
-                    <button @click="activeTab = 'clients'"
-                            :class="activeTab === 'clients' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
-                            class="py-3 px-4 font-medium transition">
-                        VPN Clients
-                    </button>
-                    <button @click="activeTab = 'users'"
-                            :class="activeTab === 'users' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600 hover:text-gray-900'"
-                            class="py-3 px-4 font-medium transition">
-                        Users
                     </button>
                 </div>
             </div>
@@ -42,10 +47,152 @@
             <div x-show="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
                 <span x-text="error"></span>
             </div>
-
             <!-- Success Message -->
             <div x-show="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
                 <span x-text="success"></span>
+            </div>
+            
+            <!-- SERVERS TAB -->
+            <div x-show="activeTab === 'servers'">
+                <!-- Add Server Form -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h2 class="text-lg font-bold mb-4">Add New Server</h2>
+                    <form @submit.prevent="addServer">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <input type="text" x-model="newServer.name"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Server name (e.g. 'Frankfurt')" required>
+                            <input type="text" x-model="newServer.host"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Host (IP or domain)">
+                            <input type="text" x-model="newServer.username"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Username (for SSH)">
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <select x-model="newServer.auth_type" 
+                                    class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                <option value="local">Local (this server)</option>
+                                <option value="password">Password auth</option>
+                                <option value="key">Key auth</option>
+                                <option value="key+sudo">Key + sudo password</option>
+                            </select>
+                            <input type="password" x-model="newServer.password"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Password (if needed)">
+                            <input type="text" x-model="newServer.port"
+                                class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="SSH port (default 22)">
+                        </div>
+                        <div class="mb-4" x-show="newServer.auth_type.includes('key')">
+                            <textarea x-model="newServer.private_key"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500 font-mono text-sm"
+                                    rows="4"
+                                    placeholder="Paste private key here (including BEGIN and END lines)"></textarea>
+                        </div>
+                        <button type="submit" 
+                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                                :disabled="addingServer">
+                            <span x-show="!addingServer">Add Server</span>
+                            <span x-show="addingServer">Adding...</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Servers Table -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Name</th>
+                                    <th class="px-4 py-2 text-left">Host</th>
+                                    <th class="px-4 py-2 text-left">Type</th>
+                                    <th class="px-4 py-2 text-left">Status</th>
+                                    <th class="px-4 py-2 text-left">Clients</th>
+                                    <th class="px-4 py-2 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="server in servers" :key="server.id">
+                                    <tr class="border-t">
+                                        <td class="px-4 py-2 font-medium" x-text="server.name"></td>
+                                        <td class="px-4 py-2" x-text="server.host || 'local'"></td>
+                                        <td class="px-4 py-2">
+                                            <span class="px-2 py-1 rounded text-xs"
+                                                :class="{
+                                                    'bg-green-100 text-green-800': server.auth_type === 'local',
+                                                    'bg-blue-100 text-blue-800': server.auth_type === 'password',
+                                                    'bg-purple-100 text-purple-800': server.auth_type === 'key',
+                                                    'bg-yellow-100 text-yellow-800': server.auth_type === 'key+sudo'
+                                                }"
+                                                x-text="server.auth_type"></span>
+                                        </td>
+                                        <td class="px-4 py-2">
+                                            <span x-show="server.status?.online" class="text-green-600">● Online</span>
+                                            <span x-show="!server.status?.online" class="text-gray-400">● Offline</span>
+                                            <span x-show="server.status?.container_running" class="text-green-600 text-xs ml-1">(container up)</span>
+                                        </td>
+                                        <td class="px-4 py-2" x-text="server.status?.clients_count || 0"></td>
+                                        <td class="px-4 py-2">
+                                            <button type="button"
+                                                    @click.prevent="testServer(server.id)"
+                                                    class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1">
+                                                Test
+                                            </button>
+                                            <button @click="setupServer(server.id)" 
+                                                    class="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 mr-1"
+                                                    x-show="server.auth_type !== 'local'">
+                                                Setup
+                                            </button>
+                                            <button @click="editServer(server)" 
+                                                    class="bg-yellow-500 text-white px-2 py-1 rounded text-xs hover:bg-yellow-600 mr-1">
+                                                Edit
+                                            </button>
+                                            <button @click="deleteServer(server.id, server.name)" 
+                                                    class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600"
+                                                    :disabled="server.auth_type === 'local'">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Setup Log Modal -->
+                <div x-show="showSetupModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold">Server Setup Log</h3>
+                            <button @click="closeSetupModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        </div>
+                        <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-sm h-96 overflow-y-auto">
+                            <template x-for="(log, index) in setupLogs" :key="index">
+                                <div :class="{
+                                    'text-green-400': log.type === 'success',
+                                    'text-red-400': log.type === 'error',
+                                    'text-yellow-400': log.type === 'warning',
+                                    'text-blue-400': log.type === 'info',
+                                    'text-white': log.type === 'step' && log.success,
+                                    'text-red-300': log.type === 'step' && !log.success
+                                }">
+                                    <span x-show="log.type === 'step'" x-text="`[${log.success ? '✓' : '✗'}] ${log.name}`"></span>
+                                    <span x-show="log.type !== 'step'" x-text="log.message"></span>
+                                    <span x-show="log.output" class="text-gray-400 text-xs block ml-4" x-text="log.output"></span>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="flex justify-end mt-4">
+                            <button @click="closeSetupModal" 
+                                    class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- CLIENTS TAB -->
@@ -54,12 +201,24 @@
                 <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                     <h2 class="text-lg font-bold mb-4">Add New Client</h2>
                     <form @submit.prevent="addClient">
-                        <div class="flex gap-2 max-w-md">
-                            <input type="text" x-model="newClientName"
-                                   class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                   placeholder="Client name (e.g. 'iPhone 15')" required>
+                        <div class="flex flex-wrap gap-2 items-end">
+                            <div class="flex-1 min-w-[200px]">
+                                <label class="block text-sm text-gray-600 mb-1">Client Name</label>
+                                <input type="text" x-model="newClientName"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                    placeholder="e.g. 'iPhone 15'" required>
+                            </div>
+                            <div class="w-48">
+                                <label class="block text-sm text-gray-600 mb-1">Server</label>
+                                <select x-model="selectedServerId" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                    <template x-for="server in servers" :key="server.id">
+                                        <option :value="server.id" x-text="server.name"></option>
+                                    </template>
+                                </select>
+                            </div>
                             <button type="submit" 
-                                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 whitespace-nowrap"
+                                    class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 h-[42px]"
                                     :disabled="adding">
                                 <span x-show="!adding">Add Client</span>
                                 <span x-show="adding">Adding...</span>
@@ -70,92 +229,130 @@
 
                 <!-- Clients Table -->
                 <div class="bg-white rounded-lg shadow-md p-6">
-				<div class="overflow-x-auto">
-					<table class="w-full">
-						<thead>
-							<tr class="bg-gray-50">
-								<th class="px-4 py-2 text-left">Name</th>
-								<th class="px-4 py-2 text-left">IP</th>
-								<th class="px-4 py-2 text-left">Public Key</th>
-								<th class="px-4 py-2 text-left">Traffic</th>
-								<th class="px-4 py-2 text-left">Limit</th>
-								<th class="px-4 py-2 text-left">Used</th>
-								<th class="px-4 py-2 text-left">Status</th>
-								<th class="px-4 py-2 text-left">Last Handshake</th>
-								<th class="px-4 py-2 text-left">Actions</th>
-							</tr>
-						</thead>
-						<tbody>
-							<template x-for="client in clients" :key="client.public_key">
-								<tr class="border-t" :class="{'bg-red-50': !client.is_active}">
-									<td class="px-4 py-2" x-text="client.name"></td>
-									<td class="px-4 py-2" x-text="client.ip"></td>
-									<td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
-									<td class="px-4 py-2" x-text="client.traffic || 'N/A'"></td>
-									
-									<!-- Limit column -->
-									<td class="px-4 py-2">
-										<div x-data="{ editing: false, newLimit: client.limit ? client.limit/1024/1024 : 0, unit: 'MB' }">
-											<template x-if="!editing">
-												<div>
-													<span x-text="client.limit ? formatBytes(client.limit) : 'No limit'"></span>
-													<button @click="editing = true; newLimit = client.limit ? client.limit/1024/1024 : 0" 
-															class="ml-2 text-blue-500 text-xs hover:text-blue-700">✎</button>
-												</div>
-											</template>
-											<template x-if="editing">
-												<div class="flex items-center gap-1">
-													<input type="number" x-model="newLimit" 
-														   class="w-20 px-1 py-0.5 border rounded text-sm"
-														   min="0" step="0.1">
-													<select x-model="unit" class="text-sm border rounded px-1 py-0.5">
-														<option value="MB">MB</option>
-														<option value="GB">GB</option>
-														<option value="TB">TB</option>
-													</select>
-													<button @click="setLimitWithUnit(client.public_key, newLimit, unit); editing = false" 
-															class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
-													<button @click="editing = false" 
-															class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
-												</div>
-											</template>
-										</div>
-									</td>
-									
-									<!-- Used column -->
-									<td class="px-4 py-2">
-										<span x-text="formatBytes(client.used)"></span>
-										<span x-show="client.limit" class="text-xs text-gray-500">
-											(<span x-text="((client.used/client.limit)*100).toFixed(1)"></span>%)
-										</span>
-									</td>
-									
-									<!-- Status column -->
-									<td class="px-4 py-2">
-										<span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
-										<span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
-									</td>
-									
-									<!-- Last Handshake -->
-									<td class="px-4 py-2" x-text="client.handshake || 'Never'"></td>
-									
-									<!-- Actions -->
-									<td class="px-4 py-2">
-										<button @click="showConfig(client)" 
-												class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 mr-2">
-											Config
-										</button>
-										<button @click="deleteClient(client.public_key, client.name)" 
-												class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
-											Delete
-										</button>
-									</td>
-								</tr>
-							</template>
-						</tbody>
-					</table>
-				</div>
-            </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Server</th>
+                                    <th class="px-4 py-2 text-left">Name</th>
+                                    <th class="px-4 py-2 text-left">IP</th>
+                                    <th class="px-4 py-2 text-left">Public Key</th>
+                                    <th class="px-4 py-2 text-left">Traffic</th>
+                                    <th class="px-4 py-2 text-left">Limit</th>
+                                    <th class="px-4 py-2 text-left">Used</th>
+                                    <th class="px-4 py-2 text-left">Expiry Date</th>
+                                    <th class="px-4 py-2 text-left">Status</th>
+                                    <th class="px-4 py-2 text-left">Last Handshake</th>
+                                    <th class="px-4 py-2 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="client in clients" :key="client.public_key">
+                                    <tr class="border-t" :class="{'bg-red-50': !client.is_active}">
+                                        <td class="px-4 py-2">
+                                            <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" 
+                                                x-text="client.server_name || 'local'"></span>
+                                        </td>
+                                        <td class="px-4 py-2" x-text="client.name"></td>
+                                        <td class="px-4 py-2" x-text="client.ip"></td>
+                                        <td class="px-4 py-2 font-mono text-sm" x-text="client.public_key"></td>
+                                        <td class="px-4 py-2" x-text="client.traffic || 'N/A'"></td>
+                                        
+                                        <!-- Limit column -->
+                                        <td class="px-4 py-2">
+                                            <div x-data="{ editing: false, newLimit: client.limit ? client.limit/1024/1024 : 0, unit: 'MB' }">
+                                                <template x-if="!editing">
+                                                    <div>
+                                                        <span x-text="client.limit ? formatBytes(client.limit) : 'No limit'"></span>
+                                                        <button @click="editing = true; newLimit = client.limit ? client.limit/1024/1024 : 0" 
+                                                                class="ml-2 text-blue-500 text-xs hover:text-blue-700">✎</button>
+                                                    </div>
+                                                </template>
+                                                <template x-if="editing">
+                                                    <div class="flex items-center gap-1">
+                                                        <input type="number" x-model="newLimit" 
+                                                               class="w-20 px-1 py-0.5 border rounded text-sm"
+                                                               min="0" step="0.1">
+                                                        <select x-model="unit" class="text-sm border rounded px-1 py-0.5">
+                                                            <option value="MB">MB</option>
+                                                            <option value="GB">GB</option>
+                                                            <option value="TB">TB</option>
+                                                        </select>
+                                                        <button @click="setLimitWithUnit(client.public_key, newLimit, unit); editing = false" 
+                                                                class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
+                                                        <button @click="editing = false" 
+                                                                class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </td>
+                                        
+                                        <!-- Used column -->
+                                        <td class="px-4 py-2">
+                                            <span x-text="formatBytes(client.used)"></span>
+                                            <span x-show="client.limit" class="text-xs text-gray-500">
+                                                (<span x-text="((client.used/client.limit)*100).toFixed(1)"></span>%)
+                                            </span>
+                                        </td>
+
+                                        <!-- Expiry Date column -->
+                                        <td class="px-4 py-2">
+                                            <div x-data="{ editing: false, newDate: client.expiry_date || '', dateInput: '' }">
+                                                <template x-if="!editing">
+                                                    <div class="flex items-center">
+                                                        <span x-text="client.expiry_date || 'No expiry'" class="text-sm"></span>
+                                                        <button @click="editing = true; dateInput = client.expiry_date ? client.expiry_date.replace(' ', 'T').substring(0,16) : ''" 
+                                                                class="ml-2 text-blue-500 text-xs hover:text-blue-700" title="Edit expiry date">
+                                                            ✎
+                                                        </button>
+                                                        <button x-show="client.expiry_date" 
+                                                                @click="setExpiry(client.public_key, null)" 
+                                                                class="ml-1 text-red-500 text-xs hover:text-red-700" title="Remove expiry date">
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                                <template x-if="editing">
+                                                    <div class="flex items-center gap-1">
+                                                        <input type="datetime-local" 
+                                                            x-model="dateInput" 
+                                                            class="px-1 py-0.5 border rounded text-sm"
+                                                            :min="new Date().toISOString().slice(0,16)">
+                                                        <button @click="setExpiry(client.public_key, dateInput.replace('T', ' ') + ':00'); editing = false" 
+                                                                class="text-green-500 hover:text-green-700 text-sm font-bold">✓</button>
+                                                        <button @click="editing = false" 
+                                                                class="text-red-500 hover:text-red-700 text-sm font-bold">✕</button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </td>
+                                        
+                                        <!-- Status column -->
+                                        <td class="px-4 py-2">
+                                            <span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
+                                            <span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
+                                        </td>
+                                        
+                                        <!-- Last Handshake -->
+                                        <td class="px-4 py-2" x-text="client.handshake || 'Never'"></td>
+                                        
+                                        <!-- Actions -->
+                                        <td class="px-4 py-2">
+                                            <button @click="showConfig(client)" 
+                                                    class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 mr-2">
+                                                Config
+                                            </button>
+                                            <button @click="deleteClient(client.public_key, client.name)" 
+                                                    class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <!-- USERS TAB -->
@@ -228,23 +425,18 @@
             </div>
         </div>
 
-        <!-- Overlay -->
+        <!-- Overlay (Config + QR) -->
         <div x-show="showConfigModal"
             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
             @click.self="showConfigModal = false">
-
-            <!-- Центрируем flex-контейнер -->
             <div class="flex gap-6 justify-center items-start max-w-[90vw] w-full">
-
-                <!-- 1. Конфиг -->
+                <!-- Config -->
                 <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
                         <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                     </div>
-
                     <pre class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap break-words" x-text="selectedConfig"></pre>
-
                     <div class="flex justify-end mt-4">
                         <button @click="downloadConfig"
                                 class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
@@ -252,8 +444,7 @@
                         </button>
                     </div>
                 </div>
-
-                <!-- 2. QR -->
+                <!-- QR -->
                 <div class="bg-white rounded-lg p-5 shadow-2xl flex-shrink-0
                             w-[clamp(220px,18vw,280px)] flex flex-col items-center">
                     <div class="flex justify-between items-center w-full mb-3">
@@ -261,13 +452,11 @@
                         <button @click="showConfigModal = false"
                                 class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
                     </div>
-
                     <canvas id="qrcode"
                             class="bg-white p-2 rounded shadow"
                             :width="qrSize"
                             :height="qrSize"></canvas>
-                    
-                    <!-- Amnezia VPN Link - ПЕРЕНЕСТИ СЮДА, ДО "Scan to import" -->
+                    <!-- Amnezia VPN Link -->
                     <div class="w-full mt-3" x-show="amneziaLink">
                         <div class="text-xs text-gray-600 mb-1">Amnezia VPN Link:</div>
                         <div class="flex gap-1">
@@ -282,7 +471,6 @@
                             </button>
                         </div>
                     </div>
-                    
                     <div class="text-xs text-gray-600 mt-2 text-center">
                         Scan to import
                     </div>
@@ -298,7 +486,6 @@
                     <h3 class="text-lg font-bold">Edit User</h3>
                     <button @click="showEditModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
-
                 <form @submit.prevent="saveUser">
                     <div class="space-y-4">
                         <div>
@@ -307,14 +494,12 @@
                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                    placeholder="Username">
                         </div>
-
                         <div>
                             <label class="block text-sm font-medium mb-1">Password (leave empty to keep current)</label>
                             <input type="password" x-model="editingUser.password"
                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                    placeholder="New password">
                         </div>
-
                         <div>
                             <label class="block text-sm font-medium mb-1">Role</label>
                             <select x-model="editingUser.role" 
@@ -323,7 +508,6 @@
                                 <option value="admin">Admin</option>
                             </select>
                         </div>
-
                         <div class="flex gap-2 justify-end">
                             <button type="button" @click="showEditModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
@@ -345,9 +529,12 @@
     <script>
     function adminPanel() {
         return {
+            // State
+            servers: [],
             clients: [],
             traffic: [],
             users: [],
+            setupLogs: [],
             error: '',
             success: '',
             newClientName: '',
@@ -355,143 +542,178 @@
             showConfigModal: false,
             selectedConfig: '',
             selectedClientName: '',
+            currentUser: '',
+            amneziaLink: '',
+            currentSetupServerId: null,
             activeTab: 'clients',
+            selectedServerId: 1,
+
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
+            newServer: {
+                name: '', host: '', port: 22, username: '',
+                auth_type: 'password', password: '', private_key: ''
+            },
             showEditModal: false,
             addingUser: false,
             savingUser: false,
-            currentUser: '',
-            amneziaLink: '',
-            qrSize: 400,  // QR code size in pixels (change here to adjust)
-            
-            init() {
-                const token = localStorage.getItem('token');
+            addingServer: false,
+            showSetupModal: false,
+            qrSize: 400,
+
+            // Helper
+            getToken() {
+                return localStorage.getItem('token');
+            },
+
+            async init() {
+                const token = this.getToken();
                 const role = localStorage.getItem('role');
                 const username = localStorage.getItem('username');
-                
                 if (!token || role !== 'admin') {
                     window.location.href = '/login';
                     return;
                 }
-                
                 this.currentUser = username;
-                this.fetchAllData().then(() => {
-                    this.fetchTraffic();
-                });
-                
+                await this.fetchServers();           // сначала серверы
+                if (this.servers.length > 0) {
+                    this.selectedServerId = this.servers[0].id;
+                }
+                await this.loadAllData();            // клиенты, лимиты, пользователи
+                this.fetchTraffic();                  // трафик
+                setInterval(() => this.fetchTraffic(), 5000);
                 setInterval(() => {
-                    this.fetchTraffic();
-                }, 5000);
+                    this.servers.forEach(server => this.fetchServerStatus(server.id));
+                }, 30000);
             },
 
-            async fetchAllData() {
+            // Единая загрузка всех основных данных (кроме трафика)
+            async loadAllData() {
                 try {
-                    const token = localStorage.getItem('token');
-                    
-                    const [clientsRes, limitsRes, usersRes] = await Promise.all([
-                        fetch('/api/clients', { headers: { 'Authorization': `Bearer ${token}` } }),
+                    const token = this.getToken();
+                    if (this.servers.length === 0) {
+                        await this.fetchServers();
+                    }
+
+                    // Собираем клиентов со всех серверов
+                    const allClients = [];
+                    for (const server of this.servers) {
+                        const clientsRes = await fetch(`/api/clients?server_id=${server.id}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (clientsRes.ok) {
+                            const serverClients = await clientsRes.json();
+                            serverClients.forEach(c => {
+                                c.server_id = server.id;
+                                c.server_name = server.name;
+                            });
+                            allClients.push(...serverClients);
+                        }
+                    }
+
+                    const [limitsRes, usersRes] = await Promise.all([
                         fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } }),
-                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }),
+                        fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } })
                     ]);
-                    
-                    if (clientsRes.ok && limitsRes.ok && usersRes.ok) {
-                        const clientsData = await clientsRes.json();
+
+                    if (limitsRes.ok && usersRes.ok) {
                         const limits = await limitsRes.json();
                         const users = await usersRes.json();
-                        
                         const limitsMap = {};
                         limits.forEach(l => limitsMap[l.public_key] = l);
-                        
-                        this.clients = clientsData.map(client => ({
-                            ...client,
-                            limit: limitsMap[client.public_key]?.limit,
-                            used: limitsMap[client.public_key]?.used || 0,
-                            is_active: limitsMap[client.public_key]?.is_active !== false
-                        }));
-                        
+
+                        this.clients = allClients.map(client => {
+                            const limitData = limitsMap[client.public_key];
+                            return {
+                                ...client,
+                                limit: limitData?.limit,
+                                used: limitData?.used || 0,
+                                expiry_date: limitData?.expiry_date,
+                                is_active: limitData ? limitData.is_active === 1 : true  // изменено
+                            };
+                        });
                         this.users = users;
+                        await this.fetchTraffic();
                     }
                 } catch (err) {
+                    console.error('loadAllData error:', err);
                     this.error = 'Failed to load data';
                 }
             },
-            
+
             async fetchTraffic() {
                 try {
-                    const response = await fetch('/api/traffic', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        const trafficData = await response.json();
-                        this.traffic = trafficData;
-                        
-                        // Получаем свежие лимиты и статусы
-                        const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
+                    const token = this.getToken();
+                    const [limitsRes] = await Promise.all([
+                        fetch('/api/limits', { headers: { 'Authorization': `Bearer ${token}` } })
+                    ]);
+
+                    let limitsMap = {};
+                    if (limitsRes.ok) {
+                        const limits = await limitsRes.json();
+                        limits.forEach(l => limitsMap[l.public_key] = l);
+                    }
+
+                    let allTraffic = [];
+                    for (const server of this.servers) {
+                        const url = server.id === 1
+                            ? '/api/traffic'
+                            : `/api/traffic?server_id=${server.id}`;
+                        const trafficRes = await fetch(url, {
+                            headers: { 'Authorization': `Bearer ${token}` }
                         });
-                        
-                        if (limitsResponse.ok) {
-                            const limits = await limitsResponse.json();
-                            const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
-                            });
-                            
-                            const trafficMap = {};
-                            trafficData.forEach(t => {
-                                trafficMap[t.public_key] = t;
-                            });
-                            
-                            this.clients = this.clients.map(client => {
-                                const t = trafficMap[client.public_key];
-                                const limitData = limitsMap[client.public_key];
-                                
-                                return {
-                                    ...client,
-                                    traffic: t?.transfer || '0 B',
-                                    handshake: t?.latest_handshake || 'Never',
-                                    used: limitData?.used || client.used,
-                                    is_active: limitData?.is_active !== false  // ← обновляем статус
-                                };
-                            });
+                        if (trafficRes.ok) {
+                            const serverTraffic = await trafficRes.json();
+                            allTraffic = allTraffic.concat(serverTraffic);
                         }
                     }
+
+                    const trafficMap = {};
+                    allTraffic.forEach(t => trafficMap[t.public_key] = t);
+
+                    this.clients = this.clients.map(client => {
+                        const t = trafficMap[client.public_key];
+                        const limitData = limitsMap[client.public_key];
+                        return {
+                            ...client,
+                            traffic: t?.transfer || '0 B',
+                            handshake: t?.latest_handshake || 'Never',
+                            used: limitData?.used || client.used,
+                            limit: limitData?.limit,
+                            expiry_date: limitData?.expiry_date,
+                            is_active: limitData ? limitData.is_active === 1 : true
+                        };
+                    });
                 } catch (err) {
-                    console.error('Failed to fetch traffic');
+                    console.error('fetchTraffic error:', err);
                 }
             },
-            
+
             async addClient() {
                 this.adding = true;
                 this.error = '';
                 this.success = '';
-                
                 try {
-                    const response = await fetch('/api/clients', {
+                    const url = this.selectedServerId && this.selectedServerId !== 1
+                        ? `/api/clients?server_id=${this.selectedServerId}`
+                        : '/api/clients';
+                    const response = await fetch(url, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ name: this.newClientName })
                     });
-                    
                     if (response.ok) {
                         const newClient = await response.json();
-                        // Save returned config (contains PrivateKey) so we can show it without extra fetch
-                        if (newClient.config) newClient.config = newClient.config;
+                        const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
+                        newClient.server_name = server?.name || 'local';
+                        newClient.server_id = this.selectedServerId || 1;
                         this.clients.push(newClient);
                         this.newClientName = '';
                         this.success = 'Client added successfully';
                         setTimeout(() => this.success = '', 3000);
-
-                        // If API returned config, display it directly to ensure PrivateKey is shown
                         this.showConfig(newClient);
                     } else {
                         const error = await response.json();
@@ -503,19 +725,17 @@
                     this.adding = false;
                 }
             },
-            
+
             async showConfig(client) {
                 try {
                     let config = client.config;
-                    
-                    // Если нет конфига в клиенте - запрашиваем
                     if (!config) {
-                        const response = await fetch(`/api/user-config?public_key=${encodeURIComponent(client.public_key)}`, {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
+                        const url = client.server_id
+                            ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
+                            : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
+                        const response = await fetch(url, {
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
                         });
-                        
                         if (response.ok) {
                             const data = await response.json();
                             config = data.config;
@@ -524,40 +744,35 @@
                             return;
                         }
                     }
-                    
+                    if (!config) {
+                        this.error = 'Config is empty';
+                        return;
+                    }
                     this.selectedConfig = config;
                     this.selectedClientName = client.name;
                     this.showConfigModal = true;
-                    
-                    // Ждем рендера модалки
                     await this.$nextTick();
-                    
-                    // Генерируем QR
                     setTimeout(() => {
                         const qrContainer = document.getElementById('qrcode');
-                        if (qrContainer) {
+                        if (qrContainer && config) {
                             qrContainer.innerHTML = '';
                             QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
                         }
                     }, 50);
-                    
-                    // Запрашиваем Amnezia VPN ссылку
-                    const linkResponse = await fetch(`/api/generate-link?public_key=${encodeURIComponent(client.public_key)}`, {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
-                    });
-                    
+                    const linkResponse = await fetch(
+                        `/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`,
+                        { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
+                    );
                     if (linkResponse.ok) {
                         const linkData = await linkResponse.json();
                         this.amneziaLink = linkData.link;
                     }
-                    
                 } catch (err) {
+                    console.error('showConfig error:', err);
                     this.error = 'Failed to get config';
                 }
             },
-            
+
             downloadConfig() {
                 const blob = new Blob([this.selectedConfig], { type: 'text/plain' });
                 const url = window.URL.createObjectURL(blob);
@@ -569,18 +784,12 @@
             },
 
             async deleteClient(publicKey, clientName) {
-                if (!confirm(`Are you sure you want to delete ${clientName}?`)) {
-                    return;
-                }
-                
+                if (!confirm(`Are you sure you want to delete ${clientName}?`)) return;
                 try {
                     const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
                         method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         this.clients = this.clients.filter(c => c.public_key !== publicKey);
                         this.success = 'Client deleted successfully';
@@ -596,84 +805,94 @@
 
             async setLimit(publicKey, limitBytes) {
                 try {
-                    const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    const response = await fetch(
+                        `/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
                         }
-                    });
-                    
+                    );
                     if (response.ok) {
                         this.success = 'Limit updated successfully';
                         setTimeout(() => this.success = '', 3000);
-                        
-                        // Сохраняем текущие значения трафика
-                        const currentTraffic = {};
-                        this.clients.forEach(c => {
-                            currentTraffic[c.public_key] = {
-                                traffic: c.traffic,
-                                handshake: c.handshake
-                            };
-                        });
-                        
-                        // Обновляем данные
+                        // Обновляем лимиты через повторный запрос /api/limits
                         const limitsResponse = await fetch('/api/limits', {
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
                         });
-                        
                         if (limitsResponse.ok) {
                             const limits = await limitsResponse.json();
                             const limitsMap = {};
-                            limits.forEach(l => {
-                                limitsMap[l.public_key] = l;
+                            limits.forEach(l => limitsMap[l.public_key] = l);
+                            this.clients = this.clients.map(client => {
+                                const limitData = limitsMap[client.public_key];
+                                return {
+                                    ...client,
+                                    limit: limitData?.limit,
+                                    used: limitData?.used || 0,
+                                    expiry_date: limitData?.expiry_date,
+                                    is_active: limitData ? limitData.is_active === 1 : true
+                                };
                             });
-                            
-                            this.clients = this.clients.map(client => ({
-                                ...client,
-                                limit: limitsMap[client.public_key]?.limit,
-                                used: limitsMap[client.public_key]?.used || 0,
-                                is_active: limitsMap[client.public_key]?.is_active !== false,
-                                // Сохраняем трафик из currentTraffic
-                                traffic: currentTraffic[client.public_key]?.traffic || client.traffic,
-                                handshake: currentTraffic[client.public_key]?.handshake || client.handshake
-                            }));
                         }
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to set limit';
                     }
                 } catch (err) {
+                    console.error('setLimit error', err);
                     this.error = 'Failed to set limit';
                 }
             },
-            
-			formatBytes(bytes) {
-				if (!bytes || bytes === 0) return '0 B';
-				const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-				const k = 1024;
-				const i = Math.floor(Math.log(bytes) / Math.log(k));
-				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
-			},
 
-			setLimitWithUnit(publicKey, value, unit) {
-				let bytes = value;
-				switch(unit) {
-					case 'MB': bytes = value * 1024 * 1024; break;
-					case 'GB': bytes = value * 1024 * 1024 * 1024; break;
-					case 'TB': bytes = value * 1024 * 1024 * 1024 * 1024; break;
-					default: bytes = value * 1024 * 1024; // MB по умолчанию
-				}
-				this.setLimit(publicKey, Math.round(bytes));
-			},
+            formatBytes(bytes) {
+                if (!bytes || bytes === 0) return '0 B';
+                const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const k = 1024;
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
+            },
+
+            setLimitWithUnit(publicKey, value, unit) {
+                let bytes = value;
+                switch (unit) {
+                    case 'MB': bytes = value * 1024 * 1024; break;
+                    case 'GB': bytes = value * 1024 * 1024 * 1024; break;
+                    case 'TB': bytes = value * 1024 * 1024 * 1024 * 1024; break;
+                    default: bytes = value * 1024 * 1024;
+                }
+                this.setLimit(publicKey, Math.round(bytes));
+            },
+
+            async setExpiry(publicKey, expiryDate) {
+                try {
+                    const response = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${this.getToken()}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ expiry_date: expiryDate })
+                    });
+                    if (response.ok) {
+                        this.success = 'Expiry date updated successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        await this.loadAllData(); // полная перезагрузка
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to set expiry date';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to set expiry date';
+                    console.error(err);
+                }
+            },
 
             // ========== USERS METHODS ==========
             async fetchUsers() {
                 try {
                     const response = await fetch('/api/users', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-
                     if (response.ok) {
                         this.users = await response.json();
                     }
@@ -686,17 +905,15 @@
                 this.addingUser = true;
                 this.error = '';
                 this.success = '';
-
                 try {
                     const response = await fetch('/api/users', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(this.newUser)
                     });
-
                     if (response.ok) {
                         this.newUser = { username: '', password: '', role: 'user' };
                         this.success = 'User created successfully';
@@ -722,12 +939,11 @@
                 this.savingUser = true;
                 this.error = '';
                 this.success = '';
-
                 try {
                     const response = await fetch(`/api/users/${this.editingUser.id}`, {
                         method: 'PUT',
                         headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                            'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
@@ -736,7 +952,6 @@
                             role: this.editingUser.role || null
                         })
                     });
-
                     if (response.ok) {
                         this.success = 'User updated successfully';
                         setTimeout(() => this.success = '', 3000);
@@ -754,9 +969,7 @@
             },
 
             deleteUserConfirm(user) {
-                if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) {
-                    return;
-                }
+                if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) return;
                 this.deleteUser(user.id);
             },
 
@@ -764,11 +977,8 @@
                 try {
                     const response = await fetch(`/api/users/${userId}`, {
                         method: 'DELETE',
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-
                     if (response.ok) {
                         this.success = 'User deleted successfully';
                         setTimeout(() => this.success = '', 3000);
@@ -783,17 +993,12 @@
             },
 
             copyToClipboard(text) {
-                // Проверяем доступность clipboard API
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(() => {
                         this.success = 'Link copied!';
                         setTimeout(() => this.success = '', 2000);
-                    }).catch(() => {
-                        // Fallback
-                        this.fallbackCopy(text);
-                    });
+                    }).catch(() => this.fallbackCopy(text));
                 } else {
-                    // Fallback для старых браузеров/не HTTPS
                     this.fallbackCopy(text);
                 }
             },
@@ -814,13 +1019,156 @@
                 }
                 document.body.removeChild(textarea);
             },
-			
+
+            // ========== MULTI-SERVER MANAGEMENT ==========
+            async fetchServers() {
+                try {
+                    const response = await fetch('/api/servers', {
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        const servers = await response.json();
+                        this.servers = servers;
+                        servers.forEach(server => this.fetchServerStatus(server.id));
+                    }
+                } catch (err) {
+                    this.error = 'Failed to fetch servers';
+                }
+            },
+
+            async fetchServerStatus(serverId) {
+                try {
+                    const response = await fetch(`/api/servers/${serverId}/status`, {
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        const status = await response.json();
+                        const server = this.servers.find(s => s.id === serverId);
+                        if (server) server.status = status;
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch server status');
+                }
+            },
+
+            async addServer() {
+                this.addingServer = true;
+                this.error = '';
+                this.success = '';
+                try {
+                    const response = await fetch('/api/servers', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${this.getToken()}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(this.newServer)
+                    });
+                    if (response.ok) {
+                        this.newServer = { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' };
+                        this.success = 'Server added successfully';
+                        setTimeout(() => this.success = '', 3000);
+                        this.fetchServers();
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to add server';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to add server';
+                } finally {
+                    this.addingServer = false;
+                }
+            },
+
+            async testServer(serverId) {
+                const server = this.servers.find(s => s.id === serverId);
+                if (!server) return;
+                server.testing = true;
+                try {
+                    const response = await fetch(`/api/servers/${serverId}/test`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        this.success = 'Connection successful';
+                        await this.fetchServerStatus(serverId);
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Connection failed';
+                    }
+                } catch (err) {
+                    this.error = 'Connection test failed';
+                } finally {
+                    server.testing = false;
+                    setTimeout(() => this.success = '', 3000);
+                    setTimeout(() => this.error = '', 3000);
+                }
+            },
+
+            async setupServer(serverId) {
+                this.currentSetupServerId = serverId;
+                this.setupLogs = [];
+                this.showSetupModal = true;
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const ws = new WebSocket(`${protocol}//${window.location.host}/api/servers/${serverId}/setup-ws`);
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({ token: this.getToken() }));
+                };
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.setupLogs.push(data);
+                    this.$nextTick(() => {
+                        const logContainer = document.querySelector('.bg-gray-900');
+                        if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+                    });
+                };
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.setupLogs.push({ type: 'error', message: 'WebSocket error occurred' });
+                };
+                ws.onclose = () => {
+                    this.fetchServerStatus(serverId);
+                };
+            },
+
+            closeSetupModal() {
+                this.showSetupModal = false;
+                this.setupLogs = [];
+                this.currentSetupServerId = null;
+            },
+
+            editServer(server) {
+                alert('Edit server - coming soon');
+            },
+
+            async deleteServer(serverId, serverName) {
+                if (!confirm(`Are you sure you want to delete server "${serverName}"?`)) return;
+                try {
+                    const response = await fetch(`/api/servers/${serverId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        this.servers = this.servers.filter(s => s.id !== serverId);
+                        this.success = 'Server deleted successfully';
+                        setTimeout(() => this.success = '', 3000);
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to delete server';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to delete server';
+                }
+            },
+
             logout() {
                 localStorage.removeItem('token');
                 localStorage.removeItem('role');
                 localStorage.removeItem('username');
                 window.location.href = '/login';
             }
-        }
+        };
     }
-</script>
+    </script>
+</body>
+</html>
