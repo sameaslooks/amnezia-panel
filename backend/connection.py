@@ -35,7 +35,7 @@ class LocalConnection(Connection):
         self.container_name = container_name
         logger.debug(f"LocalConnection initialized with container {container_name}")
 
-    async def run_command(self, command: str) -> str:
+    async def run_command(self, command: str, in_container: bool = True) -> str:
         logger.debug(f"Local run: {command}")
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -51,7 +51,7 @@ class LocalConnection(Connection):
             logger.error(f"Local command error: {e}")
             return ""
 
-    async def write_file(self, path: str, content: str) -> bool:
+    async def write_file(self, path: str, content: str, in_container: bool = True) -> bool:
         logger.debug(f"Local write file {path} ({len(content)} bytes)")
         try:
             cmd = f"cat > {path} << 'EOF'\n{content}\nEOF"
