@@ -1,13 +1,14 @@
 # awg_manager.py
-from typing import List, Dict, Optional, AsyncGenerator
+from typing import List, Dict, Optional
 import re
 from datetime import datetime
+import asyncio
 
 from connection import Connection, LocalConnection, SSHConnection
 import awg_utils
 import database
 from logger import logger
-
+_stats_collect_lock = asyncio.Lock()
 
 class AmneziaWGServer:
     """Основной класс для управления сервером AmneziaWG."""
@@ -290,13 +291,19 @@ AllowedIPs = {next_ip}
         return result
 
     async def collect_traffic_stats(self):
-        logger.debug(f"Collecting traffic stats for server {self.server_id}")
-        current_traffic = await self.get_traffic_bytes()
-        for pub_key, data in current_traffic.items():
-            delta_received, delta_sent = await database.get_traffic_delta(
-            pub_key, data['received'], data['sent']
-        )
-        await database.update_traffic_usage(pub_key, delta_received, delta_sent, self)
+        async with _stats_collect_lock:
+            stats = await self.get_traffic_bytes()
+            if not stats:
+                return
+            for pub_key, data in stats.items():
+                try:
+                    received = data["received"]
+                    sent = data["sent"]
+                    await database.update_traffic(pub_key, received, sent, self.server_id)
+                except Exception:
+                    logger.exception(
+                        f"Failed to collect traffic for {pub_key[:8]} on server {self.server_id}"
+                    )
 
     async def _remove_client_iptables_rules(self, public_key: str):
         """Удаляет все правила FORWARD с комментарием block_<public_key[:8]>."""
