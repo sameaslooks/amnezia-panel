@@ -145,7 +145,7 @@ def _get_clients_stats(clients: List[Dict]) -> Dict:
 
 
 async def _get_traffic_stats(clients: List[Dict]) -> Dict:
-    total = sum(c.get('traffic_used_bytes') or 0 for c in clients)
+    total = await db.get_total_traffic_users()
     today = await db.get_traffic_today()
     return {"total": total, "today": today}
 

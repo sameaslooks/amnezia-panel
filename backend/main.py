@@ -25,7 +25,7 @@ from stats import get_dashboard_stats
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await asyncio.sleep(1)
+    await db.init_db()
     task = asyncio.create_task(collect_stats_periodically())
     yield
     task.cancel()
@@ -304,7 +304,13 @@ async def create_user_endpoint(user: UserCreate, admin: dict = Depends(get_curre
 
 @app.put("/api/users/{user_id}")
 async def update_user_endpoint(user_id: int, user: UserUpdate, admin: dict = Depends(get_current_admin)):
-    await db.update_user(user_id, user.username, user.password, user.role)
+    await db.update_user(
+        user_id, 
+        user.username, 
+        user.password, 
+        user.role,
+        user.config_limit
+    )
     return {"message": "User updated"}
 
 
@@ -653,10 +659,3 @@ async def http_exception_handler(request, exc):
 async def generic_exception_handler(request, exc):
     logger.error(f"Internal error on {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "Internal server error, please try again later."})
-
-
-@app.on_event("startup")
-async def startup():
-    setup_logger()
-    await db.init_db()
-    logger.info("Application started, debug mode: %s", os.getenv("DEBUG", "False"))

@@ -294,29 +294,40 @@ AllowedIPs = {next_ip}
         current_traffic = await self.get_traffic_bytes()
         for pub_key, data in current_traffic.items():
             delta_received, delta_sent = await database.get_traffic_delta(
-                pub_key, data['received'], data['sent']
-            )
-            if delta_received > 0 or delta_sent > 0:
-                await database.update_traffic_usage(pub_key, delta_received, delta_sent, self)
+            pub_key, data['received'], data['sent']
+        )
+        await database.update_traffic_usage(pub_key, delta_received, delta_sent, self)
+
+    async def _remove_client_iptables_rules(self, public_key: str):
+        """Удаляет все правила FORWARD с комментарием block_<public_key[:8]>."""
+        comment = f"block_{public_key[:8]}"
+        output = await self.conn.run_command("iptables -L FORWARD -n --line-numbers 2>/dev/null || true")
+        lines = output.split('\n')
+        numbers = []
+        for line in lines:
+            if comment in line:
+                parts = line.strip().split()
+                if parts and parts[0].isdigit():
+                    numbers.append(int(parts[0]))
+        for num in sorted(numbers, reverse=True):
+            await self.conn.run_command(f"iptables -D FORWARD {num} 2>/dev/null || true")
+        logger.debug(f"Removed {len(numbers)} iptables rules for {public_key[:8]}")
 
     async def block_client(self, public_key: str) -> bool:
+        await self._remove_client_iptables_rules(public_key)
         ip = await self._get_client_ip(public_key)
         if not ip:
             logger.warning(f"Cannot block {public_key[:8]}... IP not found")
             return False
-        out1 = await self.conn.run_command(f"iptables -I FORWARD 1 -s {ip} -j DROP 2>&1")
-        out2 = await self.conn.run_command(f"iptables -I FORWARD 1 -d {ip} -j DROP 2>&1")
-        logger.info(f"Blocked client {public_key[:8]}... (IP {ip}). Output: {out1.strip()} / {out2.strip()}")
+        comment = f"block_{public_key[:8]}"
+        await self.conn.run_command(f"iptables -I FORWARD 1 -s {ip} -m comment --comment '{comment}' -j DROP")
+        await self.conn.run_command(f"iptables -I FORWARD 1 -d {ip} -m comment --comment '{comment}' -j DROP")
+        logger.info(f"Blocked client {public_key[:8]}... (IP {ip})")
         return True
 
     async def unblock_client(self, public_key: str) -> bool:
-        ip = await self._get_client_ip(public_key)
-        if not ip:
-            logger.warning(f"Cannot unblock {public_key[:8]}... IP not found")
-            return False
-        out1 = await self.conn.run_command(f"iptables -D FORWARD -s {ip} -j DROP 2>&1 || true")
-        out2 = await self.conn.run_command(f"iptables -D FORWARD -d {ip} -j DROP 2>&1 || true")
-        logger.info(f"Unblocked client {public_key[:8]}... (IP {ip}). Output: {out1.strip()} / {out2.strip()}")
+        await self._remove_client_iptables_rules(public_key)
+        logger.info(f"Unblocked client {public_key[:8]}...")
         return True
 
     async def sync_iptables_with_db(self):

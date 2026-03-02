@@ -177,7 +177,7 @@
                             <template x-for="user in dashboardStats.expiring_soon" :key="user.id">
                                 <div class="text-sm p-2 bg-yellow-50 rounded">
                                     <span class="font-medium" x-text="user.username"></span>
-                                    <span class="text-yellow-600 text-xs block" x-text="'Expires: ' + new Date(user.expiry_date).toLocaleDateString()"></span>
+                                    <span class="text-yellow-600 text-xs block" x-text="'Expires: ' + formatLocalDate(user.expiry_date)"></span>
                                 </div>
                             </template>
                             <div x-show="!dashboardStats.expiring_soon.length" class="text-sm text-gray-500">
@@ -478,7 +478,7 @@
                                 <div class="flex gap-4 text-sm items-center">
                                     <span><span class="font-medium">Limit:</span> <span x-text="group.limit ? formatBytes(group.limit) : 'No limit'"></span></span>
                                     <span><span class="font-medium">Used:</span> <span x-text="formatBytes(group.used)"></span></span>
-                                    <span><span class="font-medium">Expires:</span> <span x-text="group.expiry_date ? new Date(group.expiry_date).toLocaleString() : 'Never'"></span></span>
+                                    <span><span class="font-medium">Expires:</span> <span x-text="group.expiry_date ? formatLocalDate(group.expiry_date) : 'Never'"></span></span>
                                     <button @click="editUserLimits(group)" class="text-blue-500 hover:text-blue-700 text-sm" title="Edit user limits">✎</button>
                                 </div>
                             </div>
@@ -552,6 +552,7 @@
                                     <th class="px-4 py-2 text-left">Limit</th>
                                     <th class="px-4 py-2 text-left">Used</th>
                                     <th class="px-4 py-2 text-left">Expiry</th>
+                                    <th class="px-r py-2 text-left">Config Limit</th>
                                     <th class="px-4 py-2 text-left">Created</th>
                                     <th class="px-4 py-2 text-left">Actions</th>
                                 </tr>
@@ -567,7 +568,15 @@
                                         </td>
                                         <td class="px-4 py-2" x-text="user.traffic_limit_bytes ? formatBytes(user.traffic_limit_bytes) : 'No limit'"></td>
                                         <td class="px-4 py-2" x-text="formatBytes(user.traffic_used_bytes || 0)"></td>
-                                        <td class="px-4 py-2" x-text="user.expiry_date ? new Date(user.expiry_date).toLocaleString() : 'Never'"></td>
+                                        <td class="px-4 py-2" x-text="formatLocalDate(user.expiry_date)"></td>
+                                        <td class="px-4 py-2">
+                                            <template x-if="user.role === 'admin'">
+                                                <span class="text-gray-500">Unlimited</span>
+                                            </template>
+                                            <template x-if="user.role !== 'admin'">
+                                                <span x-text="user.config_limit || '1'"></span>
+                                            </template>
+                                        </td>
                                         <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(user.created_at).toLocaleDateString()"></td>
                                         <td class="px-4 py-2">
                                             <button @click="editUserLimitsFromUser(user)" class="text-blue-500 hover:text-blue-700 mr-2" title="Edit limits">✎</button>
@@ -733,8 +742,8 @@
 
         <!-- Edit User Modal -->
         <div x-show="showEditModal"
-             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-             @click.self="showEditModal = false">
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            @click.self="showEditModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-bold">Edit User</h3>
@@ -743,16 +752,25 @@
                 <form @submit.prevent="saveUser">
                     <div class="space-y-4">
                         <input type="text" x-model="editingUser.username"
-                               class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                               placeholder="Username">
+                            class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                            placeholder="Username">
                         <input type="password" x-model="editingUser.password"
-                               class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                               placeholder="New password (leave blank to keep current)">
+                            class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                            placeholder="New password (leave blank to keep current)">
                         <select x-model="editingUser.role"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                             <option value="user">User</option>
                             <option value="admin">Admin</option>
                         </select>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Client Limit</label>
+                            <input type="number" x-model="editingUser.config_limit" min="1"
+                                class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                                placeholder="Number of allowed clients">
+                            <p class="text-xs text-gray-500 mt-1">Maximum number of clients this user can create</p>
+                        </div>
+                        
                         <div class="flex justify-end gap-2">
                             <button type="button" @click="showEditModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
@@ -940,7 +958,7 @@
                     });
                 }, 30000);
             },
-
+            
             async loadAllData() {
                 try {
                     const token = this.getToken();
@@ -1014,6 +1032,7 @@
                         this.clients.push(newClient);
                         this.newClientName = '';
                         this.success = 'Client added successfully';
+                        this.loadAllData();
                         setTimeout(() => this.success = '', 3000);
                         this.showAddClientModal = false;
                         this.showConfig(newClient);
@@ -1093,6 +1112,7 @@
                     if (response.ok) {
                         this.clients = this.clients.filter(c => c.public_key !== publicKey);
                         this.success = 'Client deleted successfully';
+                        this.loadAllData();
                         setTimeout(() => this.success = '', 3000);
                     } else {
                         const error = await response.json();
@@ -1141,7 +1161,11 @@
             },
 
             editUser(user) {
-                this.editingUser = { ...user, password: '' };
+                this.editingUser = { 
+                    ...user, 
+                    password: '',
+                    config_limit: user.config_limit || 1
+                };
                 this.showEditModal = true;
             },
 
@@ -1150,11 +1174,15 @@
                 try {
                     const response = await fetch(`/api/users/${this.editingUser.id}`, {
                         method: 'PUT',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                        headers: { 
+                            'Authorization': `Bearer ${this.getToken()}`, 
+                            'Content-Type': 'application/json' 
+                        },
                         body: JSON.stringify({
                             username: this.editingUser.username || null,
                             password: this.editingUser.password || null,
-                            role: this.editingUser.role || null
+                            role: this.editingUser.role || null,
+                            config_limit: this.editingUser.config_limit
                         })
                     });
                     if (response.ok) {
@@ -1166,8 +1194,11 @@
                         const error = await response.json();
                         this.error = error.detail || 'Failed to update user';
                     }
-                } catch (err) { this.error = 'Failed to update user'; }
-                finally { this.savingUser = false; }
+                } catch (err) { 
+                    this.error = 'Failed to update user'; 
+                } finally { 
+                    this.savingUser = false; 
+                }
             },
 
             deleteUserConfirm(user) {
@@ -1406,7 +1437,7 @@
                     user_id: group.user_id,
                     value: value,
                     unit: unit,
-                    expiry_date: group.expiry_date ? group.expiry_date.slice(0, 16) : ''
+                    expiry_date: group.expiry_date ? this.toLocalDatetimeInput(group.expiry_date) : ''
                 };
                 this.showUserLimitsModal = true;
             },
@@ -1454,29 +1485,20 @@
                         return;
                     }
 
+                    let expiryToSend = null;
                     if (this.editingUserLimits.expiry_date) {
-                        const expiryBody = this.editingUserLimits.expiry_date.replace('T', ' ') + ':00';
-                        const expiryResponse = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ expiry_date: expiryBody })
-                        });
-                        if (!expiryResponse.ok) {
-                            const err = await expiryResponse.json();
-                            this.error = err.detail || 'Failed to update expiry';
-                            return;
-                        }
-                    } else {
-                        const expiryResponse = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ expiry_date: null })
-                        });
-                        if (!expiryResponse.ok) {
-                            const err = await expiryResponse.json();
-                            this.error = err.detail || 'Failed to clear expiry';
-                            return;
-                        }
+                        expiryToSend = this.formatServerDate(this.editingUserLimits.expiry_date);
+                    }
+
+                    const expiryResponse = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ expiry_date: expiryToSend })
+                    });
+                    if (!expiryResponse.ok) {
+                        const err = await expiryResponse.json();
+                        this.error = err.detail || 'Failed to update expiry';
+                        return;
                     }
 
                     await this.loadAllData();
@@ -1515,6 +1537,7 @@
                             limit: client.limit,
                             used: client.used,
                             expiry_date: client.expiry_date,
+                            config_limit: user.config_limit,
                             clients: []
                         };
                     }
@@ -1762,6 +1785,35 @@
                     this.chart.destroy();
                     this.chart = null;
                 }
+            },
+
+            formatLocalDate(serverDateStr) {
+                if (!serverDateStr) return '';
+                const utcDate = new Date(serverDateStr.replace(' ', 'T') + 'Z');
+                return utcDate.toLocaleString(); // локальный формат
+            },
+
+            formatServerDate(localDateStr) {
+                if (!localDateStr) return null;
+                const localDate = new Date(localDateStr);
+                const year = localDate.getUTCFullYear();
+                const month = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(localDate.getUTCDate()).padStart(2, '0');
+                const hours = String(localDate.getUTCHours()).padStart(2, '0');
+                const minutes = String(localDate.getUTCMinutes()).padStart(2, '0');
+                const seconds = '00';
+                return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+            },
+
+            toLocalDatetimeInput(serverDateStr) {
+                if (!serverDateStr) return '';
+                const utcDate = new Date(serverDateStr.replace(' ', 'T') + 'Z');
+                const year = utcDate.getFullYear();
+                const month = String(utcDate.getMonth() + 1).padStart(2, '0');
+                const day = String(utcDate.getDate()).padStart(2, '0');
+                const hours = String(utcDate.getHours()).padStart(2, '0');
+                const minutes = String(utcDate.getMinutes()).padStart(2, '0');
+                return `${year}-${month}-${day}T${hours}:${minutes}`;
             },
         };
     }
