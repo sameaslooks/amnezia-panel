@@ -18,7 +18,7 @@ from tasks import collect_stats_periodically
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await asyncio.sleep(5)
+    await asyncio.sleep(1)
     task = asyncio.create_task(collect_stats_periodically())
     yield
     task.cancel()

@@ -1337,9 +1337,14 @@
                             ...s, 
                             testing: false,
                             is_active: s.is_active === 1 || s.is_active === true,
-                            status: s.id === 1 ? { online: true, container_running: true } : null
+                            status: s.id === 1 ? { 
+                                online: true, 
+                                container_running: true,
+                                version: 'local',
+                                clients_count: this.clients.filter(c => c.server_id === 1).length
+                            } : null
                         }));
-                                                
+                        
                         this.servers.forEach(server => {
                             if (server.is_active && server.id !== 1) {
                                 this.fetchServerStatus(server.id);
@@ -1786,7 +1791,6 @@
 
             async loadDashboardStats() {
                 try {
-                    // Собираем текущие статусы серверов
                     const serverStatuses = this.servers.map(s => ({
                         id: s.id,
                         name: s.name,
@@ -1794,8 +1798,6 @@
                         auth_type: s.auth_type,
                         status: s.status || { online: false, container_running: false }
                     }));
-                    
-                    console.log('Sending server statuses:', serverStatuses);
                     
                     const response = await fetch('/api/admin/stats', {
                         method: 'POST',
@@ -1808,11 +1810,11 @@
                     
                     if (response.ok) {
                         const stats = await response.json();
-                        console.log('Dashboard stats received:', stats);
                         this.dashboardStats = stats;
-                        this.$nextTick(() => {
+                        // Даём время DOM обновиться, затем рендерим график
+                        setTimeout(() => {
                             this.renderTrafficChart();
-                        });
+                        }, 100);
                     }
                 } catch (err) {
                     console.error('Error loading dashboard stats:', err);
@@ -1820,6 +1822,12 @@
             },
 
             renderTrafficChart() {
+                // Проверяем, активна ли вкладка dashboard
+                if (this.activeTab !== 'dashboard') {
+                    console.log('Not on dashboard, skipping chart render');
+                    return;
+                }
+                
                 if (this.chart) {
                     this.chart.destroy();
                     this.chart = null;
@@ -1830,10 +1838,20 @@
                     return;
                 }
                 
-                this.$nextTick(() => {
+                // Используем setTimeout вместо $nextTick для большей надёжности
+                setTimeout(() => {
                     const canvas = document.getElementById('trafficChart');
                     if (!canvas) {
                         console.error('Canvas element not found');
+                        return;
+                    }
+                    
+                    // Проверяем, видим ли canvas
+                    const rect = canvas.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) {
+                        console.log('Canvas has zero size, waiting...');
+                        // Если canvas скрыт, пробуем ещё раз через небольшую задержку
+                        setTimeout(() => this.renderTrafficChart(), 200);
                         return;
                     }
                     
@@ -1866,7 +1884,7 @@
                             options: {
                                 responsive: true,
                                 maintainAspectRatio: false,
-                                animation: false, // Отключаем анимацию для стабильности
+                                animation: false,
                                 plugins: {
                                     legend: { display: false },
                                     tooltip: { enabled: true }
@@ -1879,10 +1897,11 @@
                                 }
                             }
                         });
+                        console.log('Chart rendered successfully');
                     } catch (err) {
                         console.error('Error creating chart:', err);
                     }
-                });
+                }, 50);
             },
             
             destroyChart() {

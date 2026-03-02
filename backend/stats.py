@@ -45,31 +45,10 @@ async def get_dashboard_stats(server_statuses: List[Dict] = None) -> Dict[str, A
                 pass
     
     # Неактивные клиенты
-    inactive_clients = []
-    for client in clients:
-        if client.get('is_active') and (not client.get('handshake') or client['handshake'] == 'Never'):
-            inactive_clients.append({
-                "public_key": client['public_key'],
-                "name": client.get('name', 'Unknown'),
-                "handshake": client.get('handshake', 'Never')
-            })
+    inactive_clients = _get_inactive_clients(clients)
     
     # Активные сейчас
-    active_now = 0
-    for client in clients:
-        if client.get('handshake') and client['handshake'] != 'Never':
-            handshake_str = client['handshake']
-            try:
-                if 'second' in handshake_str:
-                    val = int(handshake_str.split()[0])
-                    if val < 300:
-                        active_now += 1
-                elif 'minute' in handshake_str:
-                    val = int(handshake_str.split()[0])
-                    if val < 5:
-                        active_now += 1
-            except:
-                pass
+    active_now = _get_active_now(clients)
     
     # История трафика
     traffic_history = await db.get_traffic_history(days=30)
@@ -226,3 +205,96 @@ def _get_top_clients(clients: List[Dict], limit: int = 10) -> List[Dict]:
         }
         for c in sorted_clients[:limit]
     ]
+
+def _get_inactive_clients(clients: List[Dict]) -> List[Dict]:
+    """Возвращает неактивных клиентов (handshake > 7 дней или Never)"""
+    inactive = []
+    seen_keys = set()  # Для отслеживания уникальных ключей
+    
+    for client in clients:
+        if not client.get('is_active'):
+            continue
+            
+        public_key = client['public_key']
+        
+        # Пропускаем, если уже добавили этого клиента
+        if public_key in seen_keys:
+            continue
+            
+        handshake = client.get('handshake')
+        
+        # Если handshake нет или "Never"
+        if not handshake or handshake == 'Never':
+            inactive.append({
+                "public_key": public_key,
+                "name": client.get('name', 'Unknown'),
+                "handshake": 'Never'
+            })
+            seen_keys.add(public_key)
+            continue
+            
+        # Парсим handshake
+        try:
+            if 'second' in handshake:
+                seconds = int(handshake.split()[0])
+                if seconds > 604800:  # больше 7 дней
+                    inactive.append({
+                        "public_key": public_key,
+                        "name": client.get('name', 'Unknown'),
+                        "handshake": handshake
+                    })
+                    seen_keys.add(public_key)
+            elif 'minute' in handshake:
+                minutes = int(handshake.split()[0])
+                if minutes > 10080:  # больше 7 дней
+                    inactive.append({
+                        "public_key": public_key,
+                        "name": client.get('name', 'Unknown'),
+                        "handshake": handshake
+                    })
+                    seen_keys.add(public_key)
+            elif 'hour' in handshake:
+                hours = int(handshake.split()[0])
+                if hours > 168:  # больше 7 дней
+                    inactive.append({
+                        "public_key": public_key,
+                        "name": client.get('name', 'Unknown'),
+                        "handshake": handshake
+                    })
+                    seen_keys.add(public_key)
+            elif 'day' in handshake:
+                days = int(handshake.split()[0])
+                if days > 7:
+                    inactive.append({
+                        "public_key": public_key,
+                        "name": client.get('name', 'Unknown'),
+                        "handshake": handshake
+                    })
+                    seen_keys.add(public_key)
+        except:
+            pass
+    
+    return inactive
+
+def _get_active_now(clients: List[Dict]) -> int:
+    """Возвращает количество активных сейчас клиентов (handshake < 5 минут)"""
+    active = 0
+    
+    for client in clients:
+        handshake = client.get('handshake')
+        if not handshake or handshake == 'Never':
+            continue
+            
+        try:
+            if 'second' in handshake:
+                seconds = int(handshake.split()[0])
+                if seconds < 300:  # меньше 5 минут
+                    active += 1
+            elif 'minute' in handshake:
+                minutes = int(handshake.split()[0])
+                if minutes < 5:  # меньше 5 минут
+                    active += 1
+        except:
+            pass
+    
+    return active
