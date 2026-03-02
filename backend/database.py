@@ -107,12 +107,14 @@ async def init_db():
 async def get_user_by_username(username: str) -> Optional[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT username, password_hash, role FROM users WHERE username = ?', (username,))
+        cursor = await db.execute('''
+            SELECT id, username, password_hash, role, traffic_limit_bytes,
+                   traffic_used_bytes, expiry_date, config_limit, created_at
+            FROM users WHERE username = ?
+        ''', (username,))
         row = await cursor.fetchone()
         if row:
-            logger.debug(f"Found user {username}")
             return dict(row)
-        logger.debug(f"User {username} not found")
         return None
 
 
@@ -220,7 +222,10 @@ async def can_create_config(user_id: int) -> bool:
         role, config_limit = row
         if role == 'admin':
             return True
-        cursor = await db.execute('SELECT COUNT(*) FROM clients WHERE user_id = ?', (user_id,))
+        cursor = await db.execute('''
+            SELECT COUNT(*) FROM clients 
+            WHERE user_id = ? AND is_deleted = 0
+        ''', (user_id,))
         current_configs = (await cursor.fetchone())[0]
         return current_configs < config_limit
 

@@ -72,6 +72,7 @@ class AmneziaWGServer:
                 'server_id': self.server_id,
                 'server_name': await self._get_server_name(),
                 'user_id': client_info['user_id'] if client_info else None,
+                'is_active': client_info['is_active'] if client_info else True,
             }
             result.append(client_data)
             if not client_info:
