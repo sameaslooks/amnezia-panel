@@ -136,7 +136,8 @@ async def get_all_users() -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
-            SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes, expiry_date, created_at
+            SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes, 
+                   expiry_date, config_limit, created_at
             FROM users ORDER BY created_at DESC
         ''')
         rows = await cursor.fetchall()
@@ -144,7 +145,8 @@ async def get_all_users() -> List[Dict]:
         return [dict(row) for row in rows]
 
 
-async def update_user(user_id: int, username: str = None, password: str = None, role: str = None):
+async def update_user(user_id: int, username: str = None, password: str = None, 
+                      role: str = None, config_limit: int = None):
     async with aiosqlite.connect(DB_PATH) as db:
         if username:
             await db.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
@@ -153,15 +155,23 @@ async def update_user(user_id: int, username: str = None, password: str = None, 
             await db.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, user_id))
         if role:
             await db.execute('UPDATE users SET role = ? WHERE id = ?', (role, user_id))
+        if config_limit is not None:
+            await db.execute('UPDATE users SET config_limit = ? WHERE id = ?', (config_limit, user_id))
         await db.commit()
         logger.info(f"Updated user {user_id}")
 
-
 async def delete_user(user_id: int):
+    """Удаляет пользователя и всех его клиентов (включая историю трафика)."""
     async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT id FROM clients WHERE user_id = ?', (user_id,))
+        rows = await cursor.fetchall()
+        client_ids = [row[0] for row in rows]
+        for cid in client_ids:
+            await db.execute('DELETE FROM traffic_history WHERE client_id = ?', (cid,))
+        await db.execute('DELETE FROM clients WHERE user_id = ?', (user_id,))
         await db.execute('DELETE FROM users WHERE id = ?', (user_id,))
         await db.commit()
-        logger.info(f"Deleted user {user_id}")
+        logger.info(f"Deleted user {user_id} and {len(client_ids)} associated clients")
 
 
 async def get_user_by_id(user_id: int) -> Optional[Dict]:
@@ -685,6 +695,12 @@ async def get_traffic_history(days: int = 30) -> List[Dict]:
         })
     return history
 
+async def get_total_traffic_users() -> int:
+    """Возвращает суммарный трафик всех пользователей (traffic_used_bytes)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT COALESCE(SUM(traffic_used_bytes), 0) FROM users')
+        row = await cursor.fetchone()
+        return row[0] if row else 0
 
 async def get_expiring_users(days: int = 7) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -713,11 +729,16 @@ async def get_traffic_delta(public_key: str, current_received: int, current_sent
         row = await cursor.fetchone()
         if row:
             prev_received, prev_sent = row
-            delta_received = max(0, current_received - prev_received)
-            delta_sent = max(0, current_sent - prev_sent)
+            if current_received < prev_received or current_sent < prev_sent:
+                delta_received = 0
+                delta_sent = 0
+            else:
+                delta_received = max(0, current_received - prev_received)
+                delta_sent = max(0, current_sent - prev_sent)
         else:
-            delta_received = current_received
-            delta_sent = current_sent
+            delta_received = 0
+            delta_sent = 0
+            
         return delta_received, delta_sent
 
 
