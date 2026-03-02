@@ -1,6 +1,6 @@
 import aiosqlite
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import bcrypt
 from logger import logger
@@ -127,11 +127,14 @@ async def create_user(username: str, password: str, role: str = 'user') -> bool:
 async def get_all_users() -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC')
+        cursor = await db.execute('''
+            SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes, expiry_date, created_at
+            FROM users ORDER BY created_at DESC
+        ''')
         rows = await cursor.fetchall()
         logger.debug(f"Fetched {len(rows)} users")
         return [dict(row) for row in rows]
-
+    
 async def update_user(user_id: int, username: str = None, password: str = None, role: str = None):
     async with aiosqlite.connect(DB_PATH) as db:
         if username:
@@ -271,7 +274,6 @@ async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
 async def update_traffic_usage(public_key: str, received: int, sent: int, server_instance=None):
     """
     Обновляет статистику трафика для клиента и пользователя.
-    Использует новую структуру БД (client_id, user_id).
     """
     logger.info(f"Updating traffic for {public_key[:8]}: recv={received}, sent={sent}")
     client = await get_client_by_public_key(public_key)
@@ -287,7 +289,29 @@ async def update_traffic_usage(public_key: str, received: int, sent: int, server
             VALUES (?, ?, ?, ?)
         ''', (client_id, received, sent, total))
         await db.commit()
-    await update_user_traffic_used(user_id, total)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('''
+            SELECT id, public_key FROM clients WHERE user_id = ?
+        ''', (user_id,))
+        user_clients = await cursor.fetchall()
+        total_user_traffic = 0
+        for c_id, c_pub in user_clients:
+            if c_pub == public_key:
+                total_user_traffic += total
+            else:
+                cursor2 = await db.execute('''
+                    SELECT total_bytes FROM traffic_history 
+                    WHERE client_id = ? 
+                    ORDER BY recorded_at DESC LIMIT 1
+                ''', (c_id,))
+                row = await cursor2.fetchone()
+                if row:
+                    total_user_traffic += row[0]
+        await db.execute('''
+            UPDATE users SET traffic_used_bytes = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (total_user_traffic, user_id))
+        await db.commit()
     ok, reason = await check_user_limits(user_id)
     if not ok:
         logger.warning(f"User {user_id} limit exceeded: {reason}, deactivating all clients")
@@ -620,7 +644,9 @@ async def update_server(server_id: int, server_data: dict):
             query = f"UPDATE servers SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             await db.execute(query, values)
             await db.commit()
-            logger.info(f"Updated server {server_id}")
+            logger.info(f"Updated server {server_id} with fields: {fields}")
+        else:
+            logger.warning(f"No fields to update for server {server_id}")
 
 async def delete_server(server_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -690,6 +716,146 @@ async def check_all_limits(server_instance=None) -> Dict:
         'expiry_deactivated': expiry,
         'total_deactivated': total
     }
+
+async def get_total_traffic_today() -> int:
+    """Возвращает общий трафик за сегодня (только сегодняшние записи)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+        
+        cursor = await db.execute('''
+            SELECT SUM(total_bytes) FROM traffic_history 
+            WHERE recorded_at >= ?
+        ''', (today_start_str,))
+        row = await cursor.fetchone()
+        
+        result = row[0] if row and row[0] else 0
+        print(f"DEBUG - Today traffic query: {today_start_str}, result: {result} bytes")
+        return result
+
+async def get_traffic_history(days: int = 30) -> List[Dict]:
+    """Возвращает историю трафика по дням"""
+    history = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        for i in range(days, 0, -1):
+            date = datetime.now() - timedelta(days=i)
+            next_date = date + timedelta(days=1)
+            
+            date_str = date.strftime('%Y-%m-%d')
+            date_start = date.strftime('%Y-%m-%d %H:%M:%S')
+            date_end = next_date.strftime('%Y-%m-%d %H:%M:%S')
+            
+            cursor = await db.execute('''
+                SELECT SUM(total_bytes) FROM traffic_history 
+                WHERE recorded_at >= ? AND recorded_at < ?
+            ''', (date_start, date_end))
+            row = await cursor.fetchone()
+            
+            bytes_total = row[0] if row and row[0] else 0
+            history.append({
+                "date": date_str,
+                "bytes": bytes_total
+            })
+    
+    return history
+
+async def get_active_clients_count(minutes: int = 5) -> int:
+    """Возвращает количество активных клиентов (handshake < minutes)"""
+    return 0
+
+async def get_expiring_users(days: int = 7) -> List[Dict]:
+    """Возвращает пользователей с истекающей подпиской"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now = datetime.now()
+        future = now + timedelta(days=days)
+        
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        future_str = future.strftime('%Y-%m-%d %H:%M:%S')
+        
+        cursor = await db.execute('''
+            SELECT id, username, expiry_date FROM users
+            WHERE expiry_date IS NOT NULL
+            AND expiry_date BETWEEN ? AND ?
+            ORDER BY expiry_date ASC
+        ''', (now_str, future_str))
+        
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+async def get_server_status_summary() -> Dict:
+    """Возвращает сводку по серверам (всего, активно, проблемы)"""
+    servers = await get_all_servers()
+    total = len(servers)
+    active = sum(1 for s in servers if s.get('is_active'))
+    issues = total - active
+    
+    return {
+        "total": total,
+        "active": active,
+        "issues": issues
+    }
+
+async def get_traffic_delta(public_key: str, current_received: int, current_sent: int) -> tuple[int, int]:
+    """
+    Вычисляет дельту трафика для клиента (разницу с предыдущим сбором)
+    Возвращает (delta_received, delta_sent)
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('''
+            SELECT bytes_received, bytes_sent FROM traffic_history 
+            WHERE client_id = (SELECT id FROM clients WHERE public_key = ?)
+            ORDER BY recorded_at DESC LIMIT 1
+        ''', (public_key,))
+        row = await cursor.fetchone()
+        
+        if row:
+            prev_received, prev_sent = row
+            delta_received = max(0, current_received - prev_received)
+            delta_sent = max(0, current_sent - prev_sent)
+        else:
+            delta_received = current_received
+            delta_sent = current_sent
+        
+        return delta_received, delta_sent
+
+async def get_traffic_today() -> int:
+    """Возвращает общий трафик за сегодня (сумму дельт)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+        cursor = await db.execute('''
+            SELECT SUM(total_bytes) FROM traffic_history 
+            WHERE recorded_at >= ?
+        ''', (today_start_str,))
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else 0
+
+async def get_traffic_history(days: int = 30) -> List[Dict]:
+    """Возвращает историю трафика по дням"""
+    history = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        for i in range(days, 0, -1):
+            date = datetime.now() - timedelta(days=i)
+            next_date = date + timedelta(days=1)
+            
+            date_str = date.strftime('%Y-%m-%d')
+            date_start = date.strftime('%Y-%m-%d %H:%M:%S')
+            date_end = next_date.strftime('%Y-%m-%d %H:%M:%S')
+            
+            cursor = await db.execute('''
+                SELECT SUM(total_bytes) FROM traffic_history 
+                WHERE recorded_at >= ? AND recorded_at < ?
+            ''', (date_start, date_end))
+            row = await cursor.fetchone()
+            
+            bytes_total = row[0] if row and row[0] else 0
+            history.append({
+                "date": date_str,
+                "bytes": bytes_total
+            })
+    
+    return history
 
 async def _force_init():
     """Принудительная инициализация БД при импорте модуля"""

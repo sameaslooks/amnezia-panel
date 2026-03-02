@@ -5,7 +5,8 @@ events {
 http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
-
+    server_tokens off;
+    
     # ----- To enable HTTP, comment this block. Don't forget to uncomment "#listen 80;" below! -----
     server {
         listen 80;
