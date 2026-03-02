@@ -2,7 +2,7 @@
 import aiosqlite
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 import bcrypt
 from logger import logger
@@ -685,7 +685,8 @@ async def check_all_limits(server_instance=None) -> Dict:
 
 async def get_traffic_today() -> int:
     async with aiosqlite.connect(DB_PATH) as db:
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_utc = datetime.now(timezone.utc).date()
+        today_start = datetime.combine(today_utc, datetime.min.time(), tzinfo=timezone.utc)
         today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
         cursor = await db.execute('''
             SELECT SUM(total_bytes) FROM traffic_history
@@ -697,36 +698,25 @@ async def get_traffic_today() -> int:
 
 async def get_traffic_history(days: int = 30) -> List[Dict]:
     history = []
+    now_utc = datetime.now(timezone.utc)
+    today_utc = now_utc.date()
     async with aiosqlite.connect(DB_PATH) as db:
-        for i in range(days - 1, 0, -1):
-            date = datetime.now() - timedelta(days=i)
-            next_date = date + timedelta(days=1)
-            date_str = date.strftime('%Y-%m-%d')
-            date_start = date.strftime('%Y-%m-%d %H:%M:%S')
-            date_end = next_date.strftime('%Y-%m-%d %H:%M:%S')
-
+        for i in range(days - 1, -1, -1):
+            day = today_utc - timedelta(days=i)
+            day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+            day_end = day_start + timedelta(days=1)
+            day_start_str = day_start.strftime('%Y-%m-%d %H:%M:%S')
+            day_end_str = day_end.strftime('%Y-%m-%d %H:%M:%S')
             cursor = await db.execute('''
                 SELECT SUM(total_bytes) FROM traffic_history
                 WHERE recorded_at >= ? AND recorded_at < ?
-            ''', (date_start, date_end))
+            ''', (day_start_str, day_end_str))
             row = await cursor.fetchone()
             bytes_total = row[0] if row and row[0] else 0
             history.append({
-                "date": date_str,
+                "date": day.isoformat(),
                 "bytes": bytes_total
             })
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_str = today_start.strftime('%Y-%m-%d')
-        cursor = await db.execute('''
-            SELECT SUM(total_bytes) FROM traffic_history
-            WHERE recorded_at >= ?
-        ''', (today_start.strftime('%Y-%m-%d %H:%M:%S'),))
-        row = await cursor.fetchone()
-        bytes_today = row[0] if row and row[0] else 0
-        history.append({
-            "date": today_str,
-            "bytes": bytes_today
-        })
     return history
 
 async def get_total_traffic_users() -> int:

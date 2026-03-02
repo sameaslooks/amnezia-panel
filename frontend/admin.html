@@ -445,15 +445,6 @@
             <div x-show="activeTab === 'clients'">
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-2">
-                        <span class="text-sm font-medium">Filter:</span>
-                        <select x-model="filterUserId" class="px-3 py-1.5 border border-gray-300 rounded text-sm">
-                            <option value="">All users</option>
-                            <template x-for="user in users" :key="user.id">
-                                <option :value="user.id" x-text="user.username"></option>
-                            </template>
-                        </select>
-                    </div>
-                    <div class="flex items-center gap-2">
                         <button @click="syncClients"
                                 class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm flex items-center gap-1"
                                 :disabled="syncing">
@@ -896,7 +887,6 @@
             currentSetupServerId: null,
             activeTab: 'dashboard',
             selectedServerId: 1,
-            filterUserId: '',
             selectedUserId: '',
             newUser: { username: '', password: '', role: 'user' },
             editingUser: { username: '', password: '', role: 'user' },
@@ -1522,11 +1512,7 @@
 
             get groupedClients() {
                 const groups = {};
-                const filteredClients = this.filterUserId
-                    ? this.clients.filter(c => c.user_id === this.filterUserId)
-                    : this.clients;
-
-                filteredClients.forEach(client => {
+                this.clients.forEach(client => {
                     const uid = client.user_id;
                     if (!groups[uid]) {
                         const user = this.users.find(u => u.id === uid) || { username: 'Unknown', role: 'user' };
@@ -1740,8 +1726,13 @@
 
                     try {
                         const trafficData = this.dashboardStats.traffic_history;
-                        const labels = trafficData.map(d => d.date);
-                        const data = trafficData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
+                        const nonZeroData = trafficData.filter(d => d.bytes > 0);
+                        if (nonZeroData.length === 0) {
+                            console.log('No traffic data yet');
+                            return;
+                        }
+                        const labels = nonZeroData.map(d => d.date);
+                        const data = nonZeroData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
 
                         this.chart = new Chart(ctx, {
                             type: 'line',
