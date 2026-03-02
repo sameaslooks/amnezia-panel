@@ -1,10 +1,11 @@
+<!-- user.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amnezia Panel - User</title>
-	<link href="/static/tailwind.min.css" rel="stylesheet">
+    <link href="/static/tailwind.min.css" rel="stylesheet">
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 </head>
 <body class="bg-gray-100">
@@ -34,12 +35,12 @@
                 init() {
                     const token = localStorage.getItem('token');
                     const role = localStorage.getItem('role');
-                    
+
                     if (!token || role !== 'user') {
                         window.location.href = '/login';
                     }
                 },
-                
+
                 logout() {
                     localStorage.removeItem('token');
                     localStorage.removeItem('role');

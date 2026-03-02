@@ -1,3 +1,4 @@
+<!-- admin.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amnezia Panel - Admin</title>
     <link href="/static/tailwind.min.css" rel="stylesheet">
-    <!-- Используем CDN для надёжности -->
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -21,16 +21,16 @@
 </head>
 <body class="bg-gray-100">
     <div class="min-h-screen flex" x-data="adminPanel()" x-init="init()">
-        <!-- Sidebar (без изменений) -->
+        <!-- Sidebar -->
         <div class="w-64 bg-gray-800 text-white flex flex-col">
             <div class="p-5 text-xl font-bold border-b border-gray-700">Amnezia VPN</div>
             <nav class="flex-1 mt-5">
                 <a href="#" @click.prevent="activeTab = 'dashboard'"
-                class="block px-5 py-3 hover:bg-gray-700 transition"
-                :class="{'bg-gray-900': activeTab === 'dashboard'}">
+                   class="block px-5 py-3 hover:bg-gray-700 transition"
+                   :class="{'bg-gray-900': activeTab === 'dashboard'}">
                     📊 Dashboard
                 </a>
-                <a href="#" @click.prevent="activeTab = 'servers'" 
+                <a href="#" @click.prevent="activeTab = 'servers'"
                    class="block px-5 py-3 hover:bg-gray-700 transition"
                    :class="{'bg-gray-900': activeTab === 'servers'}">
                     🖥️ Servers
@@ -65,9 +65,7 @@
 
             <!-- DASHBOARD TAB -->
             <div x-show="activeTab === 'dashboard'">
-                <!-- Карточки с общей статистикой -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <!-- Серверы -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
@@ -82,8 +80,6 @@
                             <span class="text-yellow-600" x-text="dashboardStats.servers.issues + ' issues'"></span>
                         </div>
                     </div>
-                    
-                    <!-- Клиенты -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
@@ -98,8 +94,6 @@
                             <span class="text-red-600" x-text="dashboardStats.clients.blocked + ' blocked'"></span>
                         </div>
                     </div>
-                    
-                    <!-- Трафик -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
@@ -112,8 +106,6 @@
                             <span x-text="'Today: ' + formatBytes(dashboardStats.traffic.today)"></span>
                         </div>
                     </div>
-                    
-                    <!-- Активные сейчас -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
@@ -128,17 +120,13 @@
                     </div>
                 </div>
 
-                <!-- Графики и таблицы в два столбца -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    <!-- Трафик по дням (график) -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-4">Traffic (last 30 days)</h3>
                         <div class="h-64">
                             <canvas id="trafficChart" x-ref="trafficChart"></canvas>
                         </div>
                     </div>
-                    
-                    <!-- Топ-10 клиентов -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-4">Top 10 Clients by Traffic</h3>
                         <div class="overflow-y-auto max-h-64">
@@ -164,9 +152,7 @@
                     </div>
                 </div>
 
-                <!-- Нижняя секция с предупреждениями и статусами -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <!-- Сервера с проблемами -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
                             <span>⚠️ Issues</span>
@@ -184,8 +170,6 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Истекающие подписки -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
                             <span>⏳ Expiring Soon</span>
@@ -203,8 +187,6 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Неактивные клиенты -->
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
                             <span>💤 Inactive Clients</span>
@@ -227,15 +209,13 @@
 
             <!-- SERVERS TAB -->
             <div x-show="activeTab === 'servers'">
-                <!-- Кнопка добавления сервера -->
                 <div class="flex justify-end mb-4">
-                    <button @click="showAddServerModal = true" 
+                    <button @click="showAddServerModal = true"
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
                         + Add Server
                     </button>
                 </div>
 
-                <!-- Servers Table -->
                 <div class="bg-white rounded-lg shadow-md p-6">
                     <div class="overflow-x-auto">
                         <table class="w-full">
@@ -265,67 +245,51 @@
                                                 x-text="server.auth_type"></span>
                                         </td>
                                         <td class="px-4 py-2">
-                                            <!-- Сервер отключен администратором -->
                                             <template x-if="!server.is_active">
                                                 <span class="text-gray-400 flex items-center gap-1">
                                                     <span class="w-2 h-2 rounded-full bg-gray-400"></span>
                                                     Disabled
                                                 </span>
                                             </template>
-                                            
-                                            <!-- Локальный сервер (id=1) - всегда Not Available -->
                                             <template x-if="server.is_active && server.id === 1">
                                                 <span class="text-green-600 flex items-center gap-1 group relative cursor-help">
                                                     <span class="w-2 h-2 rounded-full bg-green-500"></span>
                                                     Not Available
-                                                    <!-- Tooltip при наведении -->
                                                     <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
                                                         Local server (always available)
                                                         <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
                                                     </div>
                                                 </span>
                                             </template>
-                                            
-                                            <!-- Удалённые серверы - проверяем статус -->
                                             <template x-if="server.is_active && server.id !== 1">
                                                 <div class="flex items-center gap-1">
-                                                    <!-- Статус без статуса (ещё не загружен) -->
                                                     <template x-if="!server.status">
                                                         <span class="text-gray-400 flex items-center gap-1">
                                                             <span class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></span>
                                                             <span>Checking...</span>
                                                         </span>
                                                     </template>
-                                                    
-                                                    <!-- Статус загружен - показываем реальное состояние -->
                                                     <template x-if="server.status">
                                                         <div class="relative group flex items-center">
-                                                            <!-- Offline -->
                                                             <template x-if="!server.status.online">
                                                                 <span class="text-gray-400 flex items-center gap-1 cursor-help">
                                                                     <span class="w-2 h-2 rounded-full bg-gray-400"></span>
                                                                     Offline
                                                                 </span>
                                                             </template>
-                                                            
-                                                            <!-- Online (сервер доступен, контейнер не запущен) -->
                                                             <template x-if="server.status.online && !server.status.container_running">
                                                                 <span class="text-yellow-600 flex items-center gap-1 cursor-help">
                                                                     <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
                                                                     Online
                                                                 </span>
                                                             </template>
-                                                            
-                                                            <!-- Working (сервер доступен, контейнер работает) -->
                                                             <template x-if="server.status.online && server.status.container_running">
                                                                 <span class="text-green-600 flex items-center gap-1 cursor-help">
                                                                     <span class="w-2 h-2 rounded-full bg-green-500"></span>
                                                                     Working
                                                                 </span>
                                                             </template>
-                                                            
-                                                            <!-- Tooltip с версией (только для удалённых) -->
-                                                            <div x-show="server.status.version" 
+                                                            <div x-show="server.status.version"
                                                                 class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
                                                                 <span x-text="'Version: ' + server.status.version"></span>
                                                                 <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
@@ -338,7 +302,6 @@
                                         <td class="px-4 py-2" x-text="server.status?.clients_count || 0"></td>
                                         <td class="px-4 py-2">
                                             <div class="flex flex-wrap gap-1">
-                                                <!-- TEST - всегда показываем для всех серверов -->
                                                 <button type="button"
                                                         @click.prevent="testServer(server.id)"
                                                         class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs"
@@ -346,77 +309,39 @@
                                                     <span x-show="!server.testing">Test</span>
                                                     <span x-show="server.testing">...</span>
                                                 </button>
-                                                
-                                                <!-- SETUP - только для удалённых серверов, которые офлайн или контейнер не работает -->
-                                                <button @click="setupServerWithConfirm(server)" 
+                                                <button @click="setupServerWithConfirm(server)"
                                                         class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs"
-                                                        x-show="server.auth_type !== 'local' && 
-                                                                server.status &&  // Статус должен быть загружен!
-                                                                server.is_active && 
-                                                                (!server.status.online || !server.status.container_running)">
+                                                        x-show="server.auth_type !== 'local' && server.status && server.is_active && (!server.status.online || !server.status.container_running)">
                                                     Setup
                                                 </button>
-                                                
-                                                <!-- START - показать, если сервер онлайн, но контейнер не запущен -->
-                                                <button @click="startServerContainer(server)" 
+                                                <button @click="startServerContainer(server)"
                                                         class="bg-green-700 hover:bg-green-800 text-white px-2 py-1 rounded text-xs"
-                                                        x-show="server.is_active && 
-                                                                server.status?.online && 
-                                                                !server.status?.container_running"
+                                                        x-show="server.is_active && server.status?.online && !server.status?.container_running"
                                                         title="Start container">
                                                     Start
                                                 </button>
-                                                
-                                                <!-- STOP - показать, если контейнер запущен -->
-                                                <button @click="stopServerContainer(server)" 
+                                                <button @click="stopServerContainer(server)"
                                                         class="bg-red-700 hover:bg-red-800 text-white px-2 py-1 rounded text-xs"
-                                                        x-show="server.is_active && 
-                                                                server.status?.container_running"
+                                                        x-show="server.is_active && server.status?.container_running"
                                                         title="Stop container">
                                                     Stop
                                                 </button>
-                                                
-                                                <!-- ENABLE/DISABLE - всегда показываем для всех серверов (кроме локального?) -->
-                                                <button @click="toggleServer(server)" 
+                                                <button @click="toggleServer(server)"
                                                         class="text-white px-2 py-1 rounded text-xs font-medium"
                                                         :class="server.is_active ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
                                                         :title="server.is_active ? 'Disable server in panel' : 'Enable server in panel'">
                                                     <span x-text="server.is_active ? 'Disable' : 'Enable'"></span>
                                                 </button>
-                                                
-                                                <!-- EDIT - всегда показываем для всех серверов -->
-                                                <button @click="openEditServerModal(server)" 
+                                                <button @click="openEditServerModal(server)"
                                                         class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs">
                                                     Edit
                                                 </button>
-                                                
-                                                <!-- DELETE - всегда показываем, но дизейблим для локального -->
-                                                <button @click="deleteServer(server.id, server.name)" 
+                                                <button @click="deleteServer(server.id, server.name)"
                                                         class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs"
                                                         :disabled="server.auth_type === 'local'">
                                                     Delete
                                                 </button>
                                             </div>
-                                        </td>
-                                            
-                                            <!-- Кнопка включения/отключения -->
-                                            <button @click="toggleServer(server)" 
-                                                    class="text-white px-2 py-1 rounded text-xs mr-1 font-medium"
-                                                    :class="server.is_active ? 'bg-purple-600 hover:bg-purple-700' : 'bg-green-600 hover:bg-green-700'"
-                                                    :title="server.is_active ? 'Disable server' : 'Enable server'">
-                                                <span x-text="server.is_active ? 'Disable' : 'Enable'"></span>
-                                            </button>
-                                            
-                                            <button @click="openEditServerModal(server)" 
-                                                    class="bg-yellow-500 text-white px-2 py-1 rounded text-xs hover:bg-yellow-600 mr-1">
-                                                Edit
-                                            </button>
-                                            
-                                            <button @click="deleteServer(server.id, server.name)" 
-                                                    class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600"
-                                                    :disabled="server.auth_type === 'local'">
-                                                Delete
-                                            </button>
                                         </td>
                                     </tr>
                                 </template>
@@ -425,10 +350,10 @@
                     </div>
                 </div>
 
-                <!-- Edit Server Modal (новое) -->
-                <div x-show="showEditServerModal" 
-                    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                    @click.self="showEditServerModal = false">
+                <!-- Edit Server Modal -->
+                <div x-show="showEditServerModal"
+                     class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                     @click.self="showEditServerModal = false">
                     <div class="bg-white rounded-lg p-6 max-w-2xl w-full shadow-xl">
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="text-lg font-bold">Edit Server</h3>
@@ -448,7 +373,7 @@
                                 <input type="text" x-model="editingServer.port"
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                     placeholder="SSH port (default 22)">
-                                <select x-model="editingServer.auth_type" 
+                                <select x-model="editingServer.auth_type"
                                         class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                                     <option value="local">Local (this server)</option>
                                     <option value="password">Password auth</option>
@@ -485,7 +410,7 @@
                     </div>
                 </div>
 
-                <!-- Setup Log Modal (полностью восстановлено из оригинала) -->
+                <!-- Setup Log Modal -->
                 <div x-show="showSetupModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                         <div class="flex justify-between items-center mb-4">
@@ -509,7 +434,7 @@
                             </template>
                         </div>
                         <div class="flex justify-end mt-4">
-                            <button @click="closeSetupModal" 
+                            <button @click="closeSetupModal"
                                     class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
                                 Close
                             </button>
@@ -520,7 +445,6 @@
 
             <!-- CLIENTS TAB -->
             <div x-show="activeTab === 'clients'">
-                <!-- Toolbar: filter + sync + add client button -->
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-2">
                         <span class="text-sm font-medium">Filter:</span>
@@ -532,24 +456,22 @@
                         </select>
                     </div>
                     <div class="flex items-center gap-2">
-                        <button @click="syncClients" 
+                        <button @click="syncClients"
                                 class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm flex items-center gap-1"
                                 :disabled="syncing">
                             <span x-show="!syncing">⟲ Sync</span>
                             <span x-show="syncing">⟳ Syncing...</span>
                         </button>
-                        <button @click="showAddClientModal = true" 
+                        <button @click="showAddClientModal = true"
                                 class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-1">
                             + Add client
                         </button>
                     </div>
                 </div>
 
-                <!-- Clients grouped by user -->
                 <div class="space-y-6">
                     <template x-for="group in groupedClients" :key="group.user_id">
                         <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                            <!-- User header with edit button -->
                             <div class="bg-gray-50 px-6 py-4 border-b flex flex-wrap items-center justify-between gap-4">
                                 <div>
                                     <span class="font-bold text-lg" x-text="group.username || 'Unknown user'"></span>
@@ -562,7 +484,6 @@
                                     <button @click="editUserLimits(group)" class="text-blue-500 hover:text-blue-700 text-sm" title="Edit user limits">✎</button>
                                 </div>
                             </div>
-                            <!-- Clients table -->
                             <div class="overflow-x-auto">
                                 <table class="w-full">
                                     <thead class="bg-gray-100">
@@ -580,7 +501,7 @@
                                         <template x-for="client in group.clients" :key="client.public_key">
                                             <tr class="border-t" :class="{'bg-red-50': !client.is_active}">
                                                 <td class="px-4 py-2">
-                                                    <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" 
+                                                    <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800"
                                                         x-text="client.server_name || 'local'"></span>
                                                 </td>
                                                 <td class="px-4 py-2" x-text="client.name"></td>
@@ -592,11 +513,11 @@
                                                     <span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
                                                 </td>
                                                 <td class="px-4 py-2">
-                                                    <button @click="showConfig(client)" 
+                                                    <button @click="showConfig(client)"
                                                             class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1">
                                                         Config
                                                     </button>
-                                                    <button @click="deleteClient(client.public_key, client.name)" 
+                                                    <button @click="deleteClient(client.public_key, client.name)"
                                                             class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600">
                                                         Delete
                                                     </button>
@@ -616,15 +537,13 @@
 
             <!-- USERS TAB -->
             <div x-show="activeTab === 'users'">
-                <!-- Кнопка добавления пользователя -->
                 <div class="flex justify-end mb-4">
-                    <button @click="showAddUserModal = true" 
+                    <button @click="showAddUserModal = true"
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
                         + Add User
                     </button>
                 </div>
 
-                <!-- Users Table -->
                 <div class="bg-white rounded-lg shadow-md p-6">
                     <div class="overflow-x-auto">
                         <table class="w-full">
@@ -666,8 +585,8 @@
             </div>
         </div>
 
-        <!-- Add Client Modal (из оригинала) -->
-        <div x-show="showAddClientModal" 
+        <!-- Add Client Modal -->
+        <div x-show="showAddClientModal"
              class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
              @click.self="showAddClientModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
@@ -685,7 +604,7 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium mb-1">Server</label>
-                            <select x-model="selectedServerId" 
+                            <select x-model="selectedServerId"
                                     class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                                 <template x-for="server in servers" :key="server.id">
                                     <option :value="server.id" x-text="server.name"></option>
@@ -694,7 +613,7 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium mb-1">User</label>
-                            <select x-model="selectedUserId" 
+                            <select x-model="selectedUserId"
                                     class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                                 <option value="">Select user</option>
                                 <template x-for="user in users" :key="user.id">
@@ -719,8 +638,8 @@
             </div>
         </div>
 
-        <!-- Add Server Modal (новое) -->
-        <div x-show="showAddServerModal" 
+        <!-- Add Server Modal -->
+        <div x-show="showAddServerModal"
              class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
              @click.self="showAddServerModal = false">
             <div class="bg-white rounded-lg p-6 max-w-2xl w-full shadow-xl">
@@ -742,7 +661,7 @@
                         <input type="text" x-model="newServer.port"
                             class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                             placeholder="SSH port (default 22)">
-                        <select x-model="newServer.auth_type" 
+                        <select x-model="newServer.auth_type"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                             <option value="local">Local (this server)</option>
                             <option value="password">Password auth</option>
@@ -775,8 +694,8 @@
             </div>
         </div>
 
-        <!-- Add User Modal (новое) -->
-        <div x-show="showAddUserModal" 
+        <!-- Add User Modal -->
+        <div x-show="showAddUserModal"
              class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
              @click.self="showAddUserModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
@@ -792,7 +711,7 @@
                         <input type="password" x-model="newUser.password"
                                class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                placeholder="Password" required>
-                        <select x-model="newUser.role" 
+                        <select x-model="newUser.role"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                             <option value="user">User</option>
                             <option value="admin">Admin</option>
@@ -815,7 +734,7 @@
         </div>
 
         <!-- Edit User Modal -->
-        <div x-show="showEditModal" 
+        <div x-show="showEditModal"
              class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
              @click.self="showEditModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
@@ -831,7 +750,7 @@
                         <input type="password" x-model="editingUser.password"
                                class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
                                placeholder="New password (leave blank to keep current)">
-                        <select x-model="editingUser.role" 
+                        <select x-model="editingUser.role"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                             <option value="user">User</option>
                             <option value="admin">Admin</option>
@@ -853,8 +772,8 @@
             </div>
         </div>
 
-        <!-- Edit User Limits Modal (полностью восстановлено из оригинала) -->
-        <div x-show="showUserLimitsModal" 
+        <!-- Edit User Limits Modal -->
+        <div x-show="showUserLimitsModal"
              class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
              @click.self="showUserLimitsModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
@@ -882,7 +801,7 @@
                             <div class="flex items-center gap-2">
                                 <input type="datetime-local" x-model="editingUserLimits.expiry_date"
                                     class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
-                                <button type="button" @click="editingUserLimits.expiry_date = ''" 
+                                <button type="button" @click="editingUserLimits.expiry_date = ''"
                                         class="px-2 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm" title="Remove expiry date">
                                     ✕
                                 </button>
@@ -903,7 +822,7 @@
             </div>
         </div>
 
-        <!-- Overlay (Config + QR) – полностью восстановлено из оригинала -->
+        <!-- Overlay (Config + QR) -->
         <div x-show="showConfigModal"
              class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
              @click.self="showConfigModal = false">
@@ -981,7 +900,7 @@
             editingUserLimits: { user_id: null, value: 0, unit: 'GB', expiry_date: '' },
             syncing: false,
             qrSize: 400,
-
+            chart: null,
             dashboardStats: {
                 servers: { total: 0, online: 0, issues: 0 },
                 clients: { total: 0, active: 0, blocked: 0 },
@@ -1021,27 +940,6 @@
                     });
                 }, 30000);
                 this.loadDashboardStats();
-            },
-
-            watch: {
-                activeTab: {
-                    immediate: true,
-                    handler(val) {
-                        if (val === 'dashboard') {
-                            this.loadDashboardStats();
-                        } else {
-                            this.destroyChart();
-                        }
-                    }
-                },
-                'dashboardStats.traffic_history': {
-                    handler() {
-                        if (this.activeTab === 'dashboard') {
-                            this.renderTrafficChart();
-                        }
-                    },
-                    deep: true
-                }
             },
 
             async loadAllData() {
@@ -1104,9 +1002,9 @@
                             'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ 
+                        body: JSON.stringify({
                             name: this.newClientName,
-                            user_id: this.selectedUserId 
+                            user_id: this.selectedUserId
                         })
                     });
                     if (response.ok) {
@@ -1214,7 +1112,6 @@
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
             },
 
-            // Users methods
             async fetchUsers() {
                 try {
                     const response = await fetch('/api/users', { headers: { 'Authorization': `Bearer ${this.getToken()}` } });
@@ -1324,53 +1221,49 @@
                 document.body.removeChild(textarea);
             },
 
-            // Multi-server methods
             async fetchServers() {
                 try {
-                    const response = await fetch('/api/servers', { 
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` } 
+                    const response = await fetch('/api/servers', {
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
                     if (response.ok) {
                         const servers = await response.json();
-                        
-                        this.servers = servers.map(s => ({ 
-                            ...s, 
+                        this.servers = servers.map(s => ({
+                            ...s,
                             testing: false,
                             is_active: s.is_active === 1 || s.is_active === true,
-                            status: s.id === 1 ? { 
-                                online: true, 
+                            status: s.id === 1 ? {
+                                online: true,
                                 container_running: true,
                                 version: 'local',
                                 clients_count: this.clients.filter(c => c.server_id === 1).length
                             } : null
                         }));
-                        
                         this.servers.forEach(server => {
                             if (server.is_active && server.id !== 1) {
                                 this.fetchServerStatus(server.id);
                             }
                         });
                     }
-                } catch (err) { 
+                } catch (err) {
                     console.error('Failed to fetch servers:', err);
-                    this.error = 'Failed to fetch servers'; 
+                    this.error = 'Failed to fetch servers';
                 }
             },
 
             async fetchServerStatus(serverId) {
                 const server = this.servers.find(s => s.id === serverId);
                 if (!server || !server.is_active) return;
-                
                 try {
-                    const response = await fetch(`/api/servers/${serverId}/status`, { 
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` } 
+                    const response = await fetch(`/api/servers/${serverId}/status`, {
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
                     if (response.ok) {
                         const status = await response.json();
                         if (server) server.status = status;
                     }
-                } catch (err) { 
-                    console.error('Failed to fetch server status'); 
+                } catch (err) {
+                    console.error('Failed to fetch server status');
                 }
             },
 
@@ -1399,13 +1292,11 @@
             async testServer(serverId) {
                 const server = this.servers.find(s => s.id === serverId);
                 if (!server) return;
-                
                 if (server.testing === undefined) {
                     this.$set(server, 'testing', true);
                 } else {
                     server.testing = true;
                 }
-                
                 try {
                     const response = await fetch(`/api/servers/${serverId}/test`, {
                         method: 'POST',
@@ -1418,8 +1309,8 @@
                         const error = await response.json();
                         this.error = error.detail || 'Connection failed';
                     }
-                } catch (err) { 
-                    this.error = 'Connection test failed'; 
+                } catch (err) {
+                    this.error = 'Connection test failed';
                 } finally {
                     server.testing = false;
                     setTimeout(() => this.success = '', 3000);
@@ -1453,10 +1344,6 @@
                 this.showSetupModal = false;
                 this.setupLogs = [];
                 this.currentSetupServerId = null;
-            },
-
-            editServer(server) {
-                alert('Edit server - coming soon');
             },
 
             async deleteServer(serverId, serverName) {
@@ -1498,7 +1385,6 @@
                 }
             },
 
-            // Редактирование лимитов из группы клиентов (старый метод)
             editUserLimits(group) {
                 let limitBytes = group.limit || 0;
                 let unit = 'MB';
@@ -1520,7 +1406,6 @@
                 this.showUserLimitsModal = true;
             },
 
-            // Новый метод для редактирования лимитов из таблицы пользователей
             editUserLimitsFromUser(user) {
                 let limitBytes = user.traffic_limit_bytes || 0;
                 let unit = 'MB';
@@ -1549,11 +1434,10 @@
                     return;
                 }
                 const publicKey = userClients[0].public_key;
-                
                 const multiplier = { 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024, 'TB': 1024 * 1024 * 1024 * 1024 };
                 let limitBytes = this.editingUserLimits.value * multiplier[this.editingUserLimits.unit];
                 limitBytes = Math.round(limitBytes);
-                
+
                 try {
                     const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
                         method: 'POST',
@@ -1564,7 +1448,7 @@
                         this.error = err.detail || 'Failed to update limit';
                         return;
                     }
-                    
+
                     if (this.editingUserLimits.expiry_date) {
                         const expiryBody = this.editingUserLimits.expiry_date.replace('T', ' ') + ':00';
                         const expiryResponse = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
@@ -1589,7 +1473,7 @@
                             return;
                         }
                     }
-                    
+
                     await this.loadAllData();
                     await this.fetchUsers();
                     this.success = 'User limits updated successfully';
@@ -1609,7 +1493,6 @@
                 window.location.href = '/login';
             },
 
-            // Group clients by user
             get groupedClients() {
                 const groups = {};
                 const filteredClients = this.filterUserId
@@ -1636,15 +1519,15 @@
             },
 
             openEditServerModal(server) {
-                this.editingServer = { 
+                this.editingServer = {
                     id: server.id,
                     name: server.name,
                     host: server.host || '',
                     port: server.port || 22,
                     username: server.username || '',
                     auth_type: server.auth_type,
-                    password: '', // Не показываем существующий пароль
-                    private_key: '', // Не показываем существующий ключ
+                    password: '',
+                    private_key: '',
                     is_active: server.is_active !== false
                 };
                 this.showEditServerModal = true;
@@ -1661,13 +1544,9 @@
                         auth_type: this.editingServer.auth_type,
                         is_active: this.editingServer.is_active
                     };
-                    
-                    // Отправляем пароль ТОЛЬКО если он был изменён (не пустой)
                     if (this.editingServer.password && this.editingServer.password.trim() !== '') {
                         updateData.password = this.editingServer.password;
                     }
-                    
-                    // Отправляем ключ ТОЛЬКО если он был изменён (не пустой)
                     if (this.editingServer.private_key && this.editingServer.private_key.trim() !== '') {
                         updateData.private_key = this.editingServer.private_key;
                     }
@@ -1685,7 +1564,7 @@
                         this.success = 'Server updated successfully';
                         setTimeout(() => this.success = '', 3000);
                         this.showEditServerModal = false;
-                        await this.fetchServers(); // Обновляем список серверов
+                        await this.fetchServers();
                     } else {
                         const error = await response.json();
                         this.error = error.detail || 'Failed to update server';
@@ -1701,13 +1580,10 @@
                 if (!confirm(`Are you sure you want to ${server.is_active ? 'disable' : 'enable'} server "${server.name}"?`)) {
                     return;
                 }
-                
                 const newStatus = !server.is_active;
                 const oldStatus = server.is_active;
-                
                 try {
                     server.is_active = newStatus;
-                    
                     const response = await fetch(`/api/servers/${server.id}`, {
                         method: 'PUT',
                         headers: {
@@ -1716,7 +1592,6 @@
                         },
                         body: JSON.stringify({ is_active: newStatus })
                     });
-                    
                     if (!response.ok) {
                         server.is_active = oldStatus;
                         const error = await response.json();
@@ -1724,7 +1599,6 @@
                     } else {
                         this.success = `Server ${newStatus ? 'enabled' : 'disabled'} successfully`;
                         setTimeout(() => this.success = '', 3000);
-                        
                         if (newStatus) {
                             await this.fetchServerStatus(server.id);
                         }
@@ -1739,16 +1613,13 @@
                 if (!confirm(`Stop container on server "${server.name}"?\nAll clients will be disconnected.`)) {
                     return;
                 }
-                
                 try {
                     const response = await fetch(`/api/servers/${server.id}/stop`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         this.success = 'Container stopped';
-                        // Сразу обновляем статус
                         setTimeout(() => this.fetchServerStatus(server.id), 2000);
                     } else {
                         const error = await response.json();
@@ -1765,10 +1636,8 @@
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    
                     if (response.ok) {
                         this.success = 'Container started';
-                        // Даём время контейнеру запуститься
                         setTimeout(() => this.fetchServerStatus(server.id), 3000);
                     } else {
                         const error = await response.json();
@@ -1798,20 +1667,17 @@
                         auth_type: s.auth_type,
                         status: s.status || { online: false, container_running: false }
                     }));
-                    
                     const response = await fetch('/api/admin/stats', {
                         method: 'POST',
-                        headers: { 
+                        headers: {
                             'Authorization': `Bearer ${this.getToken()}`,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ server_statuses: serverStatuses })
                     });
-                    
                     if (response.ok) {
                         const stats = await response.json();
                         this.dashboardStats = stats;
-                        // Даём время DOM обновиться, затем рендерим график
                         setTimeout(() => {
                             this.renderTrafficChart();
                         }, 100);
@@ -1822,50 +1688,40 @@
             },
 
             renderTrafficChart() {
-                // Проверяем, активна ли вкладка dashboard
                 if (this.activeTab !== 'dashboard') {
                     console.log('Not on dashboard, skipping chart render');
                     return;
                 }
-                
                 if (this.chart) {
                     this.chart.destroy();
                     this.chart = null;
                 }
-                
                 if (!this.dashboardStats.traffic_history || this.dashboardStats.traffic_history.length === 0) {
                     console.log('No traffic history data yet');
                     return;
                 }
-                
-                // Используем setTimeout вместо $nextTick для большей надёжности
                 setTimeout(() => {
                     const canvas = document.getElementById('trafficChart');
                     if (!canvas) {
                         console.error('Canvas element not found');
                         return;
                     }
-                    
-                    // Проверяем, видим ли canvas
                     const rect = canvas.getBoundingClientRect();
                     if (rect.width === 0 || rect.height === 0) {
                         console.log('Canvas has zero size, waiting...');
-                        // Если canvas скрыт, пробуем ещё раз через небольшую задержку
                         setTimeout(() => this.renderTrafficChart(), 200);
                         return;
                     }
-                    
                     const ctx = canvas.getContext('2d');
                     if (!ctx) {
                         console.error('Could not get canvas context');
                         return;
                     }
-                    
                     try {
                         const trafficData = this.dashboardStats.traffic_history || [];
                         const labels = trafficData.map(d => d.date);
                         const data = trafficData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
-                        
+
                         this.chart = new Chart(ctx, {
                             type: 'line',
                             data: {
@@ -1903,7 +1759,7 @@
                     }
                 }, 50);
             },
-            
+
             destroyChart() {
                 if (this.chart) {
                     this.chart.destroy();

@@ -1,11 +1,10 @@
+# awg_manager.py
 from typing import List, Dict, Optional, AsyncGenerator
-import uuid
 import re
 from datetime import datetime
 
 from connection import Connection, LocalConnection, SSHConnection
 import awg_utils
-from database import update_traffic_usage, get_all_clients
 import database
 from logger import logger
 
@@ -20,13 +19,11 @@ class AmneziaWGServer:
         logger.debug(f"AmneziaWGServer initialized for server ID {server_id}")
 
     async def _read_config(self) -> str:
-        """Читает конфигурационный файл сервера."""
         config = await self.conn.run_command("cat /opt/amnezia/awg/awg0.conf 2>/dev/null || echo ''")
         logger.debug(f"Read config, length {len(config)}")
         return config
 
     async def _write_config(self, config: str) -> bool:
-        """Записывает конфигурационный файл сервера, гарантируя завершающий перевод строки."""
         filtered_lines = []
         for line in config.splitlines():
             stripped = line.strip()
@@ -44,16 +41,10 @@ class AmneziaWGServer:
         return success
 
     async def _syncconf(self):
-        """Синхронизирует интерфейс с файлом конфигурации."""
         await self.conn.run_command("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         logger.debug("awg syncconf executed")
 
     async def get_clients(self, user_id: Optional[int] = None) -> List[Dict]:
-        """
-        Возвращает список клиентов.
-        Если user_id указан — только клиенты этого пользователя.
-        Если user_id не указан (None) — все клиенты (для админа).
-        """
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
         table_json = await self.conn.run_command("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
@@ -99,17 +90,14 @@ class AmneziaWGServer:
                     private_key=private_key,
                     server_id=self.server_id
                 )
-        
         logger.debug(f"get_clients returned {len(result)} clients (filtered by user_id={user_id})")
         return result
 
     async def _get_server_name(self) -> str:
-        """Возвращает имя сервера"""
         server_data = await database.get_server(self.server_id)
         return server_data['name'] if server_data else f"Server {self.server_id}"
 
     async def add_client(self, name: str, user_id: int) -> Dict:
-        """Добавляет нового клиента с указанным именем."""
         logger.info(f"Adding new client with name '{name}' for user {user_id} on server {self.server_id}")
         if not await database.can_create_config(user_id):
             raise ValueError("Config limit reached for this user")
@@ -122,7 +110,7 @@ class AmneziaWGServer:
 
         config = await self._read_config()
         next_ip = self._get_next_ip(config)
-        
+
         peer_section = f"""
 [Peer]
 PublicKey = {public_key}
@@ -148,7 +136,7 @@ AllowedIPs = {next_ip}
             safe_name = public_key.replace('/', '_')
             await self.conn.run_command("mkdir -p /opt/amnezia/client_configs", in_container=True)
             await self.conn.write_file(f"/opt/amnezia/client_configs/{safe_name}.conf", client_config)
-        normalized = self.normalize_config(new_config)
+        normalized = awg_utils.normalize_config(new_config)
         if not await self._write_config(normalized):
             raise Exception("Failed to write config file")
 
@@ -161,7 +149,6 @@ AllowedIPs = {next_ip}
         }
 
     async def delete_client(self, public_key: str):
-        """Удаляет клиента по публичному ключу."""
         logger.info(f"Deleting client {public_key[:8]}...")
         client = await database.get_client_by_public_key(public_key)
         if client:
@@ -184,56 +171,34 @@ AllowedIPs = {next_ip}
             if 'ip' in peer:
                 peer_block += f"AllowedIPs = {peer['ip']}\n"
             new_config += peer_block
-        normalized = self.normalize_config(new_config)
+        normalized = awg_utils.normalize_config(new_config)
         if not await self._write_config(normalized):
             raise Exception("Failed to write config")
         await self._syncconf()
         await self._remove_from_clients_table(public_key)
         await self.conn.run_command(f"rm -f /opt/amnezia/client_configs/{public_key}.conf")
-        
         logger.info(f"Client {public_key[:8]}... deleted")
 
-    def normalize_config(self, config: str) -> str:
-        """Убирает множественные пустые строки, оставляя не более одной между секциями."""
-        lines = config.splitlines()
-        result = []
-        prev_empty = False
-        for line in lines:
-            if line.strip() == '':
-                if not prev_empty:
-                    result.append('')
-                    prev_empty = True
-            else:
-                result.append(line)
-                prev_empty = False
-        if result and result[-1] == '':
-            result.pop()
-        return '\n'.join(result)
-
     async def get_client_info(self, public_key: str) -> Optional[Dict]:
-        """Возвращает имя и IP клиента по публичному ключу."""
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
         peer = next((p for p in peers if p.get('public_key') == public_key), None)
         if not peer:
             return None
-
         table_json = await self.conn.run_command("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             import json
             clients_data = json.loads(table_json)
-            name = next((item['userData'].get('clientName', 'Unknown') 
+            name = next((item['userData'].get('clientName', 'Unknown')
                         for item in clients_data if item.get('clientId') == public_key), None)
         except:
             name = None
-
         return {
             'name': name or 'Unknown',
             'ip': peer.get('ip', '')
         }
 
     async def get_client_config(self, public_key: str) -> str:
-        """Генерирует конфигурацию для указанного клиента."""
         logger.debug(f"Generating config for client {public_key[:8]}...")
         config = await self._read_config()
         if not config:
@@ -242,7 +207,6 @@ AllowedIPs = {next_ip}
 
         server_params = awg_utils.parse_server_config(config)
         peers = awg_utils.parse_peers(config)
-
         peer = next((p for p in peers if p.get('public_key') == public_key), None)
         if not peer:
             logger.warning(f"Peer {public_key[:8]}... not found in config")
@@ -275,7 +239,7 @@ AllowedIPs = {next_ip}
                 return ""
         else:
             private_key = client_data['private_key']
-        
+
         server_public = (await self.conn.run_command("cat /opt/amnezia/awg/server_public.key 2>/dev/null || true")).strip()
         if not server_public and server_params.get('private_key'):
             server_public = (await self.conn.run_command(f"echo '{server_params['private_key']}' | awg pubkey")).strip()
@@ -298,14 +262,12 @@ AllowedIPs = {next_ip}
         )
 
     async def get_traffic(self) -> List[Dict]:
-        """Возвращает текущую статистику трафика (парсинг awg show)."""
         output = await self.conn.run_command("awg show")
         traffic = awg_utils.parse_traffic_output(output)
         logger.debug(f"get_traffic returned {len(traffic)} entries")
         return traffic
 
     async def get_traffic_bytes(self) -> Dict[str, Dict]:
-        """Возвращает трафик в байтах для каждого клиента."""
         traffic_list = await self.get_traffic()
         result = {}
         for item in traffic_list:
@@ -333,11 +295,8 @@ AllowedIPs = {next_ip}
             delta_received, delta_sent = await database.get_traffic_delta(
                 pub_key, data['received'], data['sent']
             )
-            
             if delta_received > 0 or delta_sent > 0:
-                await database.update_traffic_usage(
-                    pub_key, delta_received, delta_sent, self
-                )
+                await database.update_traffic_usage(pub_key, delta_received, delta_sent, self)
 
     async def block_client(self, public_key: str) -> bool:
         ip = await self._get_client_ip(public_key)
@@ -360,7 +319,6 @@ AllowedIPs = {next_ip}
         return True
 
     async def sync_iptables_with_db(self):
-        """Синхронизирует правила iptables с состоянием is_active в БД."""
         clients = await database.get_server_clients(self.server_id)
         for client in clients:
             if client['is_active']:
@@ -370,7 +328,6 @@ AllowedIPs = {next_ip}
         logger.info(f"iptables synchronized for server {self.server_id}")
 
     async def generate_amnezia_vpn_link(self, public_key: str) -> str:
-        """Генерирует AmneziaVPN-ссылку для клиента."""
         logger.debug(f"Generating Amnezia link for {public_key[:8]}...")
         client_data = await database.get_client_by_public_key(public_key)
         if not client_data:
@@ -406,9 +363,8 @@ AllowedIPs = {next_ip}
         )
         logger.debug(f"Amnezia link generated for {public_key[:8]}...")
         return link
-    
+
     async def setup_server_stream(self, sudo_password: Optional[str] = None):
-        """Обёртка для вызова функции установки из отдельного модуля."""
         from server_setup import setup_server_stream as run_setup
         if isinstance(self.conn, LocalConnection):
             yield {"type": "error", "message": "Setup is only for remote servers"}
@@ -419,9 +375,7 @@ AllowedIPs = {next_ip}
         async for update in run_setup(self.conn, sudo_password):
             yield update
 
-    # ---------- Вспомогательные методы ----------
     async def _get_server_ip(self) -> str:
-        """Определяет внешний IP сервера."""
         if isinstance(self.conn, SSHConnection):
             return self.conn.host
         else:
@@ -431,7 +385,6 @@ AllowedIPs = {next_ip}
             return ip
 
     async def _get_client_ip(self, public_key: str) -> Optional[str]:
-        """Возвращает IP адрес клиента (без маски)."""
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
         for peer in peers:
@@ -440,7 +393,6 @@ AllowedIPs = {next_ip}
         return None
 
     def _get_next_ip(self, config: str) -> str:
-        """Определяет следующий свободный IP в подсети."""
         used_ips = []
         peers = awg_utils.parse_peers(config)
         for peer in peers:
@@ -462,7 +414,6 @@ AllowedIPs = {next_ip}
         return f"{base}.254/32"
 
     async def _update_clients_table(self, public_key: str, name: str, ip: str):
-        """Добавляет запись в clientsTable."""
         table_json = await self.conn.run_command("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             import json
@@ -482,7 +433,6 @@ AllowedIPs = {next_ip}
         logger.debug(f"Updated clientsTable for {public_key[:8]}...")
 
     async def _remove_from_clients_table(self, public_key: str):
-        """Удаляет запись из clientsTable."""
         table_json = await self.conn.run_command("cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo '[]'")
         try:
             import json
@@ -494,7 +444,6 @@ AllowedIPs = {next_ip}
             logger.error(f"Failed to update clientsTable: {e}")
 
     async def get_full_status(self) -> Dict:
-        """Возвращает полный статус сервера: онлайн, контейнер, версия, клиенты."""
         status = {
             "online": False,
             "container_running": False,
@@ -502,12 +451,11 @@ AllowedIPs = {next_ip}
             "clients_count": 0,
             "errors": []
         }
-        
         try:
             await self.conn.run_command("echo 'ping'", in_container=False)
             status["online"] = True
             container_check = await self.conn.run_command(
-                "docker ps --filter name=amnezia-awg2 --format '{{.Status}}'", 
+                "docker ps --filter name=amnezia-awg2 --format '{{.Status}}'",
                 in_container=False
             )
             if 'Up' in container_check:
@@ -526,14 +474,10 @@ AllowedIPs = {next_ip}
             status["errors"].append(str(e))
             logger.error(f"Failed to get full status for server {self.server_id}: {e}")
         return status
-    
+
     async def stop_container(self) -> bool:
-        """Останавливает контейнер AmneziaWG на сервере."""
         try:
-            result = await self.conn.run_command(
-                "docker stop amnezia-awg2 2>/dev/null || true", 
-                in_container=False
-            )
+            await self.conn.run_command("docker stop amnezia-awg2 2>/dev/null || true", in_container=False)
             logger.info(f"Container stopped on server {self.server_id}")
             return True
         except Exception as e:
@@ -541,12 +485,8 @@ AllowedIPs = {next_ip}
             return False
 
     async def start_container(self) -> bool:
-        """Запускает контейнер AmneziaWG на сервере."""
         try:
-            result = await self.conn.run_command(
-                "docker start amnezia-awg2 2>/dev/null || true", 
-                in_container=False
-            )
+            await self.conn.run_command("docker start amnezia-awg2 2>/dev/null || true", in_container=False)
             logger.info(f"Container started on server {self.server_id}")
             return True
         except Exception as e:
@@ -554,7 +494,6 @@ AllowedIPs = {next_ip}
             return False
 
     async def restart_container(self) -> bool:
-        """Перезапускает контейнер AmneziaWG."""
         try:
             await self.stop_container()
             await self.start_container()

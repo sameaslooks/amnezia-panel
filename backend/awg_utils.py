@@ -1,10 +1,11 @@
+# awg_utils.py
 import re
-from typing import Dict, List, Optional, Tuple
-from collections import OrderedDict
 import json
 import struct
 import zlib
 import base64
+from typing import Dict, List, Optional
+
 
 def parse_server_config(config_text: str) -> Dict[str, str]:
     """Извлекает общие параметры сервера из awg0.conf."""
@@ -30,28 +31,26 @@ def parse_server_config(config_text: str) -> Dict[str, str]:
         params[key] = match.group(1).strip() if match else ''
     return params
 
+
 def parse_peers(config_text: str) -> List[Dict[str, str]]:
     """Возвращает список пиров с их параметрами."""
     peers = []
-    # Разделяем по [Peer], пропуская первую часть (интерфейс)
     peer_blocks = config_text.split('[Peer]')[1:]
     for block in peer_blocks:
         peer = {}
-        # Извлекаем PublicKey
         pk_match = re.search(r'PublicKey\s*=\s*(\S+)', block)
         if pk_match:
             peer['public_key'] = pk_match.group(1)
-        # AllowedIPs
         ip_match = re.search(r'AllowedIPs\s*=\s*([\d\.]+/\d+)', block)
         if ip_match:
             peer['ip'] = ip_match.group(1)
-        # PresharedKey (опционально)
         psk_match = re.search(r'PresharedKey\s*=\s*(\S+)', block)
         if psk_match:
             peer['psk'] = psk_match.group(1)
-        if peer:  # добавляем только если есть хоть что-то
+        if peer:
             peers.append(peer)
     return peers
+
 
 def parse_traffic_output(output: str) -> List[Dict[str, str]]:
     """Парсит вывод команды 'awg show' в список словарей с ключами и статистикой."""
@@ -73,6 +72,7 @@ def parse_traffic_output(output: str) -> List[Dict[str, str]]:
             traffic[-1]['latest_handshake'] = line.split('latest handshake:')[1].strip()
     return traffic
 
+
 def parse_bytes(size_str: str) -> int:
     """Конвертирует строку вида '1.23 GiB' в байты."""
     size_str = size_str.strip()
@@ -89,6 +89,7 @@ def parse_bytes(size_str: str) -> int:
         return 0
     return 0
 
+
 def generate_client_config(
     client_ip: str,
     client_private_key: str,
@@ -98,17 +99,13 @@ def generate_client_config(
     dns: str = '1.1.1.1, 1.0.0.1',
     **obfuscation_params
 ) -> str:
-    """
-    Генерирует конфигурацию клиента в формате AmneziaWG.
-    obfuscation_params: Jc, Jmin, Jmax, S1..S4, H1..H4, I1 (опционально)
-    """
+    """Генерирует конфигурацию клиента в формате AmneziaWG."""
     lines = [
         '[Interface]',
         f'Address = {client_ip}',
         f'DNS = {dns}',
         f'PrivateKey = {client_private_key}',
     ]
-    # Добавляем параметры обфускации, если они есть
     for key in ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4']:
         val = obfuscation_params.get(key.lower())
         if val:
@@ -129,15 +126,13 @@ def generate_client_config(
     ])
     return '\n'.join(lines)
 
+
 def generate_amnezia_vpn_link(
-    server_params: Dict[str, str],          # параметры сервера (host, port, ключи и т.д.)
-    client: Dict[str, str],                 # клиент: ip, private_key, public_key, psk
-    obfuscation: Dict[str, str]             # Jc, Jmin, Jmax, S1..S4, H1..H4, I1
+    server_params: Dict[str, str],
+    client: Dict[str, str],
+    obfuscation: Dict[str, str]
 ) -> str:
-    """
-    Генерирует ссылку вида vpn://... для AmneziaVPN.
-    """
-    # Внутренний конфиг клиента (без мета-информации)
+    """Генерирует ссылку вида vpn://... для AmneziaVPN."""
     inner_config = generate_client_config(
         client_ip=client['ip'],
         client_private_key=client['private_key'],
@@ -147,77 +142,74 @@ def generate_amnezia_vpn_link(
         **obfuscation
     )
 
-    # Полная структура для Amnezia
-    from collections import OrderedDict
-
-    last_config = OrderedDict([
-        ("H1", obfuscation.get('h1', '')),
-        ("H2", obfuscation.get('h2', '')),
-        ("H3", obfuscation.get('h3', '')),
-        ("H4", obfuscation.get('h4', '')),
-        ("I1", obfuscation.get('i1', '')),
-        ("I2", ""),
-        ("I3", ""),
-        ("I4", ""),
-        ("I5", ""),
-        ("Jc", obfuscation.get('jc', '5')),
-        ("Jmax", obfuscation.get('jmax', '50')),
-        ("Jmin", obfuscation.get('jmin', '10')),
-        ("S1", obfuscation.get('s1', '95')),
-        ("S2", obfuscation.get('s2', '21')),
-        ("S3", obfuscation.get('s3', '6')),
-        ("S4", obfuscation.get('s4', '10')),
-        ("allowed_ips", ["0.0.0.0/0", "::/0"]),
-        ("clientId", client['public_key']),
-        ("client_ip", client['ip'].split('/')[0]),
-        ("client_priv_key", client['private_key']),
-        ("client_pub_key", client['public_key']),
-        ("config", inner_config),
-        ("hostName", server_params['host']),
-        ("mtu", "1376"),
-        ("persistent_keep_alive", "25"),
-        ("port", int(server_params['port'])),
-        ("psk_key", client.get('psk', '')),
-        ("server_pub_key", server_params['public_key']),
-    ])
+    last_config = {
+        "H1": obfuscation.get('h1', ''),
+        "H2": obfuscation.get('h2', ''),
+        "H3": obfuscation.get('h3', ''),
+        "H4": obfuscation.get('h4', ''),
+        "I1": obfuscation.get('i1', ''),
+        "I2": "",
+        "I3": "",
+        "I4": "",
+        "I5": "",
+        "Jc": obfuscation.get('jc', '5'),
+        "Jmax": obfuscation.get('jmax', '50'),
+        "Jmin": obfuscation.get('jmin', '10'),
+        "S1": obfuscation.get('s1', '95'),
+        "S2": obfuscation.get('s2', '21'),
+        "S3": obfuscation.get('s3', '6'),
+        "S4": obfuscation.get('s4', '10'),
+        "allowed_ips": ["0.0.0.0/0", "::/0"],
+        "clientId": client['public_key'],
+        "client_ip": client['ip'].split('/')[0],
+        "client_priv_key": client['private_key'],
+        "client_pub_key": client['public_key'],
+        "config": inner_config,
+        "hostName": server_params['host'],
+        "mtu": "1376",
+        "persistent_keep_alive": "25",
+        "port": int(server_params['port']),
+        "psk_key": client.get('psk', ''),
+        "server_pub_key": server_params['public_key'],
+    }
 
     last_config_str = json.dumps(last_config, indent=4, separators=(',', ': '), ensure_ascii=False)
 
-    server_config = OrderedDict([
-        ("containers", [
-            OrderedDict([
-                ("awg", OrderedDict([
-                    ("H1", obfuscation.get('h1', '')),
-                    ("H2", obfuscation.get('h2', '')),
-                    ("H3", obfuscation.get('h3', '')),
-                    ("H4", obfuscation.get('h4', '')),
-                    ("I1", obfuscation.get('i1', '')),
-                    ("I2", ""),
-                    ("I3", ""),
-                    ("I4", ""),
-                    ("I5", ""),
-                    ("Jc", obfuscation.get('jc', '5')),
-                    ("Jmax", obfuscation.get('jmax', '50')),
-                    ("Jmin", obfuscation.get('jmin', '10')),
-                    ("S1", obfuscation.get('s1', '95')),
-                    ("S2", obfuscation.get('s2', '21')),
-                    ("S3", obfuscation.get('s3', '6')),
-                    ("S4", obfuscation.get('s4', '10')),
-                    ("last_config", last_config_str),
-                    ("port", server_params['port']),
-                    ("protocol_version", "2"),
-                    ("subnet_address", "10.8.1.0"),
-                    ("transport_proto", "udp"),
-                ])),
-                ("container", "amnezia-awg2"),
-            ])
-        ]),
-        ("defaultContainer", "amnezia-awg2"),
-        ("description", "Amnezia VPN Server"),
-        ("dns1", "1.1.1.1"),
-        ("dns2", "1.0.0.1"),
-        ("hostName", server_params['host']),
-    ])
+    server_config = {
+        "containers": [
+            {
+                "awg": {
+                    "H1": obfuscation.get('h1', ''),
+                    "H2": obfuscation.get('h2', ''),
+                    "H3": obfuscation.get('h3', ''),
+                    "H4": obfuscation.get('h4', ''),
+                    "I1": obfuscation.get('i1', ''),
+                    "I2": "",
+                    "I3": "",
+                    "I4": "",
+                    "I5": "",
+                    "Jc": obfuscation.get('jc', '5'),
+                    "Jmax": obfuscation.get('jmax', '50'),
+                    "Jmin": obfuscation.get('jmin', '10'),
+                    "S1": obfuscation.get('s1', '95'),
+                    "S2": obfuscation.get('s2', '21'),
+                    "S3": obfuscation.get('s3', '6'),
+                    "S4": obfuscation.get('s4', '10'),
+                    "last_config": last_config_str,
+                    "port": server_params['port'],
+                    "protocol_version": "2",
+                    "subnet_address": "10.8.1.0",
+                    "transport_proto": "udp",
+                },
+                "container": "amnezia-awg2",
+            }
+        ],
+        "defaultContainer": "amnezia-awg2",
+        "description": "Amnezia VPN Server",
+        "dns1": "1.1.1.1",
+        "dns2": "1.0.0.1",
+        "hostName": server_params['host'],
+    }
 
     json_str = json.dumps(server_config, indent=4, ensure_ascii=False) + "\n"
     data = json_str.encode("utf-8")
@@ -226,3 +218,21 @@ def generate_amnezia_vpn_link(
     qt = header + compressed
     b64 = base64.urlsafe_b64encode(qt).decode().rstrip("=")
     return f"vpn://{b64}"
+
+
+def normalize_config(config: str) -> str:
+    """Убирает множественные пустые строки, оставляя не более одной между секциями."""
+    lines = config.splitlines()
+    result = []
+    prev_empty = False
+    for line in lines:
+        if line.strip() == '':
+            if not prev_empty:
+                result.append('')
+                prev_empty = True
+        else:
+            result.append(line)
+            prev_empty = False
+    if result and result[-1] == '':
+        result.pop()
+    return '\n'.join(result)
