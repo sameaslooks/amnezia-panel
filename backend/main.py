@@ -313,6 +313,22 @@ async def delete_user_endpoint(user_id: int, admin: dict = Depends(get_current_a
     await db.delete_user(user_id)
     return {"message": "User deleted"}
 
+@app.get("/api/user/profile")
+async def get_user_profile(current_user: dict = Depends(get_current_user)):
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    clients = await db.get_user_clients(user_data["id"])
+    return {
+        "id": user_data["id"],
+        "username": user_data["username"],
+        "role": user_data["role"],
+        "traffic_limit_bytes": user_data.get("traffic_limit_bytes"),
+        "traffic_used_bytes": user_data.get("traffic_used_bytes", 0),
+        "expiry_date": user_data.get("expiry_date"),
+        "config_limit": user_data.get("config_limit", 1),
+        "clients_count": len(clients)
+    }
 
 @app.get("/api/user/clients")
 async def get_my_clients(
@@ -371,6 +387,17 @@ async def delete_my_client(
     return {"message": "Client deleted"}
 
 
+@app.get("/api/user/servers")
+async def get_user_servers(current_user: dict = Depends(get_current_user)):
+    """Возвращает список серверов, доступных пользователю для создания клиентов."""
+    servers = await db.get_all_servers()
+    return [
+        {"id": s["id"], "name": s["name"]} 
+        for s in servers 
+        if s.get("is_active")
+    ]
+
+
 @app.get("/api/user/traffic")
 async def get_my_traffic(
     current_user: dict = Depends(get_current_user),
@@ -381,6 +408,28 @@ async def get_my_traffic(
         raise HTTPException(status_code=404, detail="User not found")
     stats = await db.get_user_traffic_stats(user_data["id"], days)
     return stats
+
+
+@app.get("/api/user/traffic-now")
+async def get_user_traffic_now(current_user: dict = Depends(get_current_user)):
+    """Возвращает текущие данные трафика для клиентов пользователя."""
+    user_data = await db.get_user_by_username(current_user["sub"])
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    clients = await db.get_user_clients(user_data["id"])
+    servers = await db.get_all_servers()
+    result = []
+    for server in servers:
+        if not server.get('is_active'):
+            continue
+        from main import get_server_public
+        server_instance = await get_server_public(server['id'])
+        traffic_data = await server_instance.get_traffic()
+        user_keys = [c['public_key'] for c in clients if c['server_id'] == server['id']]
+        for t in traffic_data:
+            if t['public_key'] in user_keys:
+                result.append(t)
+    return result
 
 
 @app.get("/api/admin/stats")

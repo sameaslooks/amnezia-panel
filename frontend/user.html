@@ -6,49 +6,576 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amnezia Panel - User</title>
     <link href="/static/tailwind.min.css" rel="stylesheet">
-    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body class="bg-gray-100">
-    <div class="min-h-screen" x-data="userPanel()" x-init="init()">
+    <div x-data="userPanel()" x-init="init()" class="min-h-screen">
+        <!-- Navbar -->
         <nav class="bg-white shadow-lg">
             <div class="max-w-7xl mx-auto px-4">
                 <div class="flex justify-between items-center h-16">
-                    <h1 class="text-xl font-bold">Amnezia VPN User</h1>
-                    <button @click="logout" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
-                        Logout
-                    </button>
+                    <h1 class="text-xl font-bold text-gray-800">Amnezia VPN User Panel</h1>
+                    <div class="flex items-center gap-4">
+                        <span class="text-sm text-gray-600" x-text="profile.username"></span>
+                        <button @click="logout" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded text-sm">
+                            Logout
+                        </button>
+                    </div>
                 </div>
             </div>
         </nav>
 
+        <!-- Main Content -->
         <div class="max-w-7xl mx-auto px-4 py-6">
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-lg font-bold mb-4">Your Profile</h2>
-                <p class="text-gray-600">You are logged in as a regular user.</p>
+            <!-- Error / Success -->
+            <div x-show="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                <span x-text="error"></span>
+            </div>
+            <div x-show="success" class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+                <span x-text="success"></span>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="loading" class="text-center py-12">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <p class="mt-2 text-gray-600">Loading...</p>
+            </div>
+
+            <template x-if="!loading">
+                <div>
+                    <!-- Stats Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <!-- Traffic used card -->
+                        <div class="bg-white rounded-lg shadow-md p-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">Traffic Used</p>
+                                    <p class="text-2xl font-bold" x-text="formatBytes(profile.traffic_used_bytes || 0)"></p>
+                                </div>
+                                <div class="text-blue-500 text-2xl">📊</div>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                <span>Limit: </span>
+                                <span x-text="profile.traffic_limit_bytes ? formatBytes(profile.traffic_limit_bytes) : 'Unlimited'"></span>
+                                <span x-show="profile.traffic_limit_bytes" class="ml-2">
+                                    (<span x-text="getUsagePercent()"></span>%)
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Expiry card -->
+                        <div class="bg-white rounded-lg shadow-md p-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">Expiry Date</p>
+                                    <p class="text-2xl font-bold" x-text="formatExpiry()"></p>
+                                </div>
+                                <div class="text-yellow-500 text-2xl">⏳</div>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                <span x-show="profile.expiry_date" x-text="getRemainingDays() + ' days remaining'"></span>
+                                <span x-show="!profile.expiry_date">Never expires</span>
+                            </div>
+                        </div>
+
+                        <!-- Clients count -->
+                        <div class="bg-white rounded-lg shadow-md p-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">Clients</p>
+                                    <p class="text-2xl font-bold" x-text="clients.length + ' / ' + (profile.config_limit || '∞')"></p>
+                                </div>
+                                <div class="text-green-500 text-2xl">📱</div>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                <span>Active: </span>
+                                <span x-text="activeClientsCount"></span>
+                            </div>
+                        </div>
+
+                        <!-- Active now -->
+                        <div class="bg-white rounded-lg shadow-md p-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm text-gray-500">Active Now</p>
+                                    <p class="text-2xl font-bold" x-text="activeNow"></p>
+                                </div>
+                                <div class="text-green-500 text-2xl">⚡</div>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                <span>Last 5 minutes</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Add Client Button -->
+                    <div class="flex justify-end mb-4">
+                        <button @click="openAddModal" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
+                            + Add Client
+                        </button>
+                    </div>
+
+                    <!-- Clients Table -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+                        <div class="px-6 py-4 border-b bg-gray-50">
+                            <h3 class="font-bold">Your VPN Clients</h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead class="bg-gray-100">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left">Server</th>
+                                        <th class="px-4 py-2 text-left">Name</th>
+                                        <th class="px-4 py-2 text-left">IP</th>
+                                        <th class="px-4 py-2 text-left">Traffic</th>
+                                        <th class="px-4 py-2 text-left">Last Seen</th>
+                                        <th class="px-4 py-2 text-left">Status</th>
+                                        <th class="px-4 py-2 text-left">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="client in clients" :key="client.id">
+                                        <tr class="border-t" :class="{'bg-red-50': !client.is_active}">
+                                            <td class="px-4 py-2">
+                                                <span class="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800" x-text="client.server_name"></span>
+                                            </td>
+                                            <td class="px-4 py-2 font-medium" x-text="client.name"></td>
+                                            <td class="px-4 py-2 font-mono text-sm" x-text="client.ip"></td>
+                                            <td class="px-4 py-2" x-text="client.traffic || '0 B'"></td>
+                                            <td class="px-4 py-2 text-sm" x-text="client.handshake || 'Never'"></td>
+                                            <td class="px-4 py-2">
+                                                <span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
+                                                <span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
+                                            </td>
+                                            <td class="px-4 py-2">
+                                                <button @click="showConfig(client)" class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1">
+                                                    Config
+                                                </button>
+                                                <button @click="deleteClient(client.id, client.name)" class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600">
+                                                    Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <tr x-show="!clients.length">
+                                        <td colspan="7" class="px-4 py-6 text-center text-gray-500">
+                                            No clients yet. Click "Add Client" to create one.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Add Client Modal -->
+        <div x-show="showAddModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showAddModal = false">
+            <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold">Add New Client</h3>
+                    <button @click="showAddModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                </div>
+                <form @submit.prevent="addClient">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Client Name</label>
+                            <input type="text" x-model="newClientName" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" placeholder="e.g. iPhone 15" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Server</label>
+                            <select x-model="selectedServerId" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                                <template x-for="server in servers" :key="server.id">
+                                    <option :value="server.id" x-text="server.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="flex justify-end gap-2">
+                            <button type="button" @click="showAddModal = false" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600" :disabled="adding">
+                                <span x-show="!adding">Add</span>
+                                <span x-show="adding">Adding...</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Config Modal (with QR) -->
+        <div x-show="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showConfigModal = false">
+            <div class="flex gap-6 justify-center items-start max-w-[90vw] w-full">
+                <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold" x-text="'Configuration for ' + (selectedClient?.name || '')"></h3>
+                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                    </div>
+                    <pre class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap break-words" x-text="selectedClient?.config"></pre>
+                    <div class="flex justify-end mt-4">
+                        <button @click="downloadConfig" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                            Download Config
+                        </button>
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg p-5 shadow-2xl flex-shrink-0 w-[clamp(220px,18vw,280px)] flex flex-col items-center">
+                    <div class="flex justify-between items-center w-full mb-3">
+                        <h3 class="text-sm font-semibold">QR Code</h3>
+                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
+                    </div>
+                    <canvas id="qrcode-user" class="bg-white p-2 rounded shadow" width="400" height="400"></canvas>
+                    <div class="text-xs text-gray-600 mt-2 text-center">Scan to import</div>
+                    <template x-if="selectedClient && selectedClient.amneziaLink">
+                        <div class="w-full mt-3">
+                            <div class="text-xs text-gray-600 mb-1">Amnezia VPN Link:</div>
+                            <div class="flex gap-1">
+                                <input type="text" :value="selectedClient.amneziaLink" class="flex-1 text-xs border rounded px-2 py-1 bg-gray-50" readonly @click="$event.target.select()">
+                                <button @click="copyToClipboard(selectedClient.amneziaLink)" class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600">Copy</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        function userPanel() {
-            return {
-                init() {
-                    const token = localStorage.getItem('token');
-                    const role = localStorage.getItem('role');
+    function userPanel() {
+        return {
+            // Data
+            profile: {},
+            clients: [],
+            servers: [],
+            trafficHistory: [],
+            // UI state
+            loading: true,
+            error: '',
+            success: '',
+            showAddModal: false,
+            showConfigModal: false,
+            newClientName: '',
+            selectedServerId: 1,
+            selectedClient: null,
+            adding: false,
+            chart: null,
+            // Computed
+            get activeClientsCount() {
+                return this.clients.filter(c => c.is_active).length;
+            },
+            get activeNow() {
+                // Простейшая реализация: считаем клиентов с handshake < 5 минут
+                const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+                return this.clients.filter(c => {
+                    if (!c.handshake || c.handshake === 'Never') return false;
+                    const handshakeTime = this.parseHandshake(c.handshake);
+                    return handshakeTime && handshakeTime > fiveMinAgo;
+                }).length;
+            },
 
-                    if (!token || role !== 'user') {
-                        window.location.href = '/login';
-                    }
-                },
-
-                logout() {
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('role');
-                    localStorage.removeItem('username');
+            async init() {
+                const token = localStorage.getItem('token');
+                const role = localStorage.getItem('role');
+                if (!token || role !== 'user') {
                     window.location.href = '/login';
+                    return;
                 }
+                await this.loadData();
+                // Обновляем трафик каждые 10 секунд
+                setInterval(() => this.fetchTraffic(), 10000)
+            },
+
+            async loadData() {
+                try {
+                    const token = localStorage.getItem('token');
+                    // Загружаем профиль
+                    const profileRes = await fetch('/api/user/profile', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (profileRes.ok) this.profile = await profileRes.json();
+
+                    // Загружаем список серверов (активные)
+                    const serversRes = await fetch('/api/user/servers', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (serversRes.ok) {
+                        const all = await serversRes.json();
+                        this.servers = all;
+                        if (this.servers.length > 0) this.selectedServerId = this.servers[0].id;
+                    }
+
+                    // Загружаем клиентов
+                    await this.loadClients();
+                } catch (err) {
+                    this.error = 'Failed to load data';
+                    console.error(err);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            async loadClients() {
+                const token = localStorage.getItem('token');
+                const res = await fetch('/api/user/clients', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    this.clients = await res.json();
+                    await this.fetchTraffic();
+                }
+            },
+
+            async fetchTraffic() {
+                try {
+                    const token = localStorage.getItem('token');
+                    const trafficRes = await fetch('/api/user/traffic-now', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (trafficRes.ok) {
+                        const allTraffic = await trafficRes.json();
+                        const trafficMap = {};
+                        allTraffic.forEach(t => trafficMap[t.public_key] = t);
+
+                        this.clients = this.clients.map(client => {
+                            const t = trafficMap[client.public_key];
+                            return {
+                                ...client,
+                                traffic: t?.transfer || '0 B',
+                                handshake: t?.latest_handshake || 'Never'
+                            };
+                        });
+                    }
+                } catch (err) {
+                    console.error('fetchTraffic error:', err);
+                }
+            },
+
+            async addClient() {
+                if (!this.newClientName.trim()) return;
+                this.adding = true;
+                this.error = '';
+                try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch(`/api/user/clients?server_id=${this.selectedServerId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ name: this.newClientName.trim() })
+                    });
+                    if (res.ok) {
+                        const newClient = await res.json();
+                        // Добавляем server_name из списка серверов
+                        const server = this.servers.find(s => s.id === this.selectedServerId);
+                        newClient.server_name = server?.name || 'Unknown';
+                        this.clients.push(newClient);
+                        this.newClientName = '';
+                        this.showAddModal = false;
+                        this.success = 'Client created successfully';
+                        // Обновляем профиль (количество клиентов)
+                        const profileRes = await fetch('/api/user/profile', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (profileRes.ok) this.profile = await profileRes.json();
+                        setTimeout(() => this.success = '', 3000);
+                    } else {
+                        const err = await res.json();
+                        this.error = err.detail || 'Failed to create client';
+                    }
+                } catch (err) {
+                    this.error = 'Network error';
+                } finally {
+                    this.adding = false;
+                }
+            },
+
+            async deleteClient(clientId, clientName) {
+                if (!confirm(`Are you sure you want to delete "${clientName}"?`)) return;
+                try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch(`/api/user/clients/${clientId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (res.ok) {
+                        this.clients = this.clients.filter(c => c.id !== clientId);
+                        this.success = 'Client deleted';
+                        // Обновляем профиль
+                        const profileRes = await fetch('/api/user/profile', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (profileRes.ok) this.profile = await profileRes.json();
+                        setTimeout(() => this.success = '', 3000);
+                    } else {
+                        const err = await res.json();
+                        this.error = err.detail || 'Failed to delete';
+                    }
+                } catch (err) {
+                    this.error = 'Network error';
+                }
+            },
+
+            async showConfig(client) {
+                try {
+                    const token = localStorage.getItem('token');
+                    const url = `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`;
+                    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.selectedClient = {
+                            ...client,
+                            config: data.config
+                        };
+                        // Запрашиваем AmneziaVPN ссылку
+                        const linkRes = await fetch(`/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (linkRes.ok) {
+                            const linkData = await linkRes.json();
+                            this.selectedClient.amneziaLink = linkData.link;
+                        } else {
+                            this.selectedClient.amneziaLink = null;
+                        }
+                        this.showConfigModal = true;
+                        this.$nextTick(() => {
+                            const canvas = document.getElementById('qrcode-user');
+                            if (canvas && data.config) {
+                                canvas.innerHTML = '';
+                                QRCode.toCanvas(canvas, data.config, { width: 400 });
+                            }
+                        });
+                    } else {
+                        this.error = 'Failed to get config';
+                    }
+                } catch (err) {
+                    this.error = 'Error loading config';
+                }
+            },
+
+            downloadConfig() {
+                if (!this.selectedClient) return;
+                const blob = new Blob([this.selectedClient.config], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${this.selectedClient.name}.conf`;
+                a.click();
+                URL.revokeObjectURL(url);
+            },
+
+            renderChart() {
+                if (this.chart) this.chart.destroy();
+                const canvas = this.$refs.trafficChart;
+                if (!canvas || !this.trafficHistory.by_client) return;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                // Суммируем трафик по дням для всех клиентов пользователя
+                const dailyData = this.trafficHistory.by_client?.reduce((acc, client) => {
+                    // Если в истории есть по дням, то нужно агрегировать. Пока используем заглушку.
+                    return [];
+                }, []);
+                // Для простоты используем общий total по дням из статистики пользователя.
+                // Но в текущем API /api/user/traffic возвращает общую сумму, а не по дням.
+                // Поэтому придется либо изменить API, либо пока не показывать график.
+                // Временно сделаем простую заглушку – график по дням из trafficHistory.total? Но там нет разбивки.
+                // Лучше добавить в /api/user/traffic возврат по дням. Пока можно пропустить.
+                // Чтобы не усложнять, оставим график пустым с сообщением.
+                console.warn('Traffic history by day not implemented');
+            },
+
+            formatBytes(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
+            },
+
+            formatExpiry() {
+                if (!this.profile.expiry_date) return 'Never';
+                const date = new Date(this.profile.expiry_date.replace(' ', 'T'));
+                return date.toLocaleDateString();
+            },
+
+            getRemainingDays() {
+                if (!this.profile.expiry_date) return 0;
+                const expiry = new Date(this.profile.expiry_date.replace(' ', 'T'));
+                const now = new Date();
+                const diff = expiry - now;
+                return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+            },
+
+            getUsagePercent() {
+                if (!this.profile.traffic_limit_bytes) return 0;
+                const used = this.profile.traffic_used_bytes || 0;
+                const limit = this.profile.traffic_limit_bytes;
+                return ((used / limit) * 100).toFixed(1);
+            },
+
+            parseHandshake(handshakeStr) {
+                if (!handshakeStr || handshakeStr === 'Never') return null;
+                const parts = handshakeStr.split(' ');
+                if (parts.length < 3) return null;
+                try {
+                    const value = parseInt(parts[0]);
+                    const unit = parts[1];
+                    const now = new Date();
+                    if (unit.includes('second')) return new Date(now - value * 1000);
+                    if (unit.includes('minute')) return new Date(now - value * 60 * 1000);
+                    if (unit.includes('hour')) return new Date(now - value * 60 * 60 * 1000);
+                    if (unit.includes('day')) return new Date(now - value * 24 * 60 * 60 * 1000);
+                } catch (e) {}
+                return null;
+            },
+
+            openAddModal() {
+                if (this.clients.length >= (this.profile.config_limit || Infinity)) {
+                    this.error = 'You have reached your client limit';
+                    setTimeout(() => this.error = '', 3000);
+                    return;
+                }
+                this.showAddModal = true;
+            },
+
+            copyToClipboard(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.success = 'Link copied!';
+                        setTimeout(() => this.success = '', 2000);
+                    }).catch(() => this.fallbackCopy(text));
+                } else {
+                    this.fallbackCopy(text);
+                }
+            },
+
+            fallbackCopy(text) {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    this.success = 'Link copied!';
+                    setTimeout(() => this.success = '', 2000);
+                } catch (err) {
+                    this.error = 'Failed to copy';
+                }
+                document.body.removeChild(textarea);
+            },
+
+            logout() {
+                localStorage.removeItem('token');
+                localStorage.removeItem('role');
+                localStorage.removeItem('username');
+                window.location.href = '/login';
             }
         }
+    }
     </script>
 </body>
 </html>

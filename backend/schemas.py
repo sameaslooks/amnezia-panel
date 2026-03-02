@@ -16,7 +16,7 @@ class TokenResponse(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str
-    user_id: int
+    user_id: Optional[int] = None
 
 
 class ExpiryDateRequest(BaseModel):
