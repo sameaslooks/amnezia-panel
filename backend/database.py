@@ -274,43 +274,29 @@ async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
 async def update_traffic_usage(public_key: str, received: int, sent: int, server_instance=None):
     """
     Обновляет статистику трафика для клиента и пользователя.
+    received и sent - это ДЕЛЬТА (сколько добавилось с прошлого раза)
     """
-    logger.info(f"Updating traffic for {public_key[:8]}: recv={received}, sent={sent}")
     client = await get_client_by_public_key(public_key)
     if not client:
         logger.warning(f"Client {public_key[:8]} not found in DB, skipping traffic update")
         return
+    
     client_id = client['id']
     user_id = client['user_id']
     total = received + sent
+    
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
             INSERT INTO traffic_history (client_id, bytes_received, bytes_sent, total_bytes)
             VALUES (?, ?, ?, ?)
         ''', (client_id, received, sent, total))
-        await db.commit()
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id, public_key FROM clients WHERE user_id = ?
-        ''', (user_id,))
-        user_clients = await cursor.fetchall()
-        total_user_traffic = 0
-        for c_id, c_pub in user_clients:
-            if c_pub == public_key:
-                total_user_traffic += total
-            else:
-                cursor2 = await db.execute('''
-                    SELECT total_bytes FROM traffic_history 
-                    WHERE client_id = ? 
-                    ORDER BY recorded_at DESC LIMIT 1
-                ''', (c_id,))
-                row = await cursor2.fetchone()
-                if row:
-                    total_user_traffic += row[0]
+        
         await db.execute('''
-            UPDATE users SET traffic_used_bytes = ?, updated_at = CURRENT_TIMESTAMP
+            UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        ''', (total_user_traffic, user_id))
+        ''', (total, user_id))
+        
         await db.commit()
     ok, reason = await check_user_limits(user_id)
     if not ok:
@@ -797,10 +783,7 @@ async def get_server_status_summary() -> Dict:
     }
 
 async def get_traffic_delta(public_key: str, current_received: int, current_sent: int) -> tuple[int, int]:
-    """
-    Вычисляет дельту трафика для клиента (разницу с предыдущим сбором)
-    Возвращает (delta_received, delta_sent)
-    """
+    """Возвращает дельту трафика (разницу с предыдущим значением)"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('''
             SELECT bytes_received, bytes_sent FROM traffic_history 
@@ -814,6 +797,7 @@ async def get_traffic_delta(public_key: str, current_received: int, current_sent
             delta_received = max(0, current_received - prev_received)
             delta_sent = max(0, current_sent - prev_sent)
         else:
+            # Первая запись
             delta_received = current_received
             delta_sent = current_sent
         
