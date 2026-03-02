@@ -39,6 +39,8 @@ async def init_db():
                 name TEXT,
                 ip TEXT,
                 private_key TEXT,
+                last_received INTEGER DEFAULT 0,
+                last_sent INTEGER DEFAULT 0,
                 server_id INTEGER DEFAULT 1,
                 server_name TEXT DEFAULT 'local',
                 is_active BOOLEAN DEFAULT 1,
@@ -288,29 +290,61 @@ async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
 
 
 # ---------- Клиенты ----------
-async def update_traffic_usage(public_key: str, received: int, sent: int, server_instance=None):
+async def update_traffic(public_key: str, received: int, sent: int, server_instance=None):
     client = await get_client_by_public_key(public_key)
     if not client:
-        logger.warning(f"Client {public_key[:8]} not found in DB, skipping traffic update")
         return
 
     client_id = client['id']
     user_id = client['user_id']
-    total = received + sent
 
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('''
-            INSERT INTO traffic_history (client_id, bytes_received, bytes_sent, total_bytes)
-            VALUES (?, ?, ?, ?)
-        ''', (client_id, received, sent, total))
+        # Получаем последние сохранённые значения
+        cursor = await db.execute(
+            'SELECT last_received, last_sent FROM clients WHERE id = ?',
+            (client_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            last_received, last_sent = row
+        else:
+            last_received = last_sent = 0
 
-        await db.execute('''
-            UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (total, user_id))
+        # Проверка на сброс счётчиков (перезапуск контейнера)
+        if received < last_received or sent < last_sent:
+            # Просто обновляем последние значения, без записи в историю
+            await db.execute(
+                'UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
+                (received, sent, client_id)
+            )
+            await db.commit()
+            logger.debug(f"Counter reset for client {client_id}, updated last values")
+            return
 
+        delta_received = received - last_received
+        delta_sent = sent - last_sent
+
+        if delta_received > 0 or delta_sent > 0:
+            # Вставляем дельту в историю
+            await db.execute('''
+                INSERT INTO traffic_history (client_id, bytes_received, bytes_sent, total_bytes)
+                VALUES (?, ?, ?, ?)
+            ''', (client_id, delta_received, delta_sent, delta_received + delta_sent))
+
+            # Обновляем суммарный трафик пользователя
+            await db.execute('''
+                UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?
+                WHERE id = ?
+            ''', (delta_received + delta_sent, user_id))
+
+        # Всегда обновляем последние значения
+        await db.execute(
+            'UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
+            (received, sent, client_id)
+        )
         await db.commit()
+
+    # Проверка лимитов после обновления
     ok, reason = await check_user_limits(user_id)
     if not ok:
         logger.warning(f"User {user_id} limit exceeded: {reason}, deactivating all clients")
@@ -717,29 +751,6 @@ async def get_expiring_users(days: int = 7) -> List[Dict]:
         ''', (now_str, future_str))
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
-
-
-async def get_traffic_delta(public_key: str, current_received: int, current_sent: int) -> tuple[int, int]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT bytes_received, bytes_sent FROM traffic_history
-            WHERE client_id = (SELECT id FROM clients WHERE public_key = ?)
-            ORDER BY recorded_at DESC LIMIT 1
-        ''', (public_key,))
-        row = await cursor.fetchone()
-        if row:
-            prev_received, prev_sent = row
-            if current_received < prev_received or current_sent < prev_sent:
-                delta_received = 0
-                delta_sent = 0
-            else:
-                delta_received = max(0, current_received - prev_received)
-                delta_sent = max(0, current_sent - prev_sent)
-        else:
-            delta_received = 0
-            delta_sent = 0
-            
-        return delta_received, delta_sent
 
 
 async def update_client_private_key(client_id: int, private_key: str):
