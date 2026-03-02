@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
-from typing import Optional, List
+from typing import Optional, List, Dict
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import os
 import asyncio
@@ -148,6 +149,26 @@ class ServerUpdate(BaseModel):
     password: Optional[str] = None
     private_key: Optional[str] = None
     is_active: Optional[bool] = None
+
+class ServerStatus(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    auth_type: str
+    status: Dict
+
+class DashboardRequest(BaseModel):
+    server_statuses: List[ServerStatus]
+
+class ServerStatusItem(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    auth_type: str
+    status: Dict
+
+class DashboardRequest(BaseModel):
+    server_statuses: List[ServerStatusItem]
 
 # ---------- Эндпоинты ----------
 @app.post("/api/login", response_model=TokenResponse)
@@ -408,6 +429,31 @@ async def get_my_traffic(
     stats = await db.get_user_traffic_stats(user_data["id"], days)
     return stats
 
+from stats import get_dashboard_stats
+
+@app.get("/api/admin/stats")
+async def admin_stats(admin: dict = Depends(get_current_admin)):
+    """Возвращает статистику для дашборда"""
+    try:
+        stats = await get_dashboard_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/stats")
+async def admin_stats_post(
+    request: DashboardRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    """Возвращает статистику для дашборда с учётом статусов серверов"""
+    try:
+        stats = await get_dashboard_stats(request.server_statuses)
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ---------- Управление серверами ----------
 @app.get("/api/servers")
 async def get_servers(admin: dict = Depends(get_current_admin)):
@@ -455,39 +501,65 @@ async def test_server_connection(server_id: int, admin: dict = Depends(get_curre
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(e)}")
 
 @app.get("/api/servers/{server_id}/status")
-async def get_server_status(server_id: int, admin: dict = Depends(get_current_admin)):
-    server_data = await db.get_server(server_id)
-    if not server_data:
-        raise HTTPException(status_code=404, detail="Server not found")
+async def get_server_status(
+    server_id: int, 
+    server: AmneziaWGServer = Depends(get_server),
+    admin: dict = Depends(get_current_admin)
+):
+    """Получает статус сервера (использует метод из awg_manager)."""
     try:
-        if server_data['auth_type'] == 'local':
-            conn = LocalConnection()
-        else:
-            conn = SSHConnection(
-                host=server_data['host'],
-                port=server_data['port'],
-                username=server_data['username'],
-                password=server_data.get('password'),
-                private_key=server_data.get('private_key')
-            )
-        awg = AmneziaWGServer(conn, server_id)
-        status = {
-            "online": True,
-            "container_running": False,
-            "version": None,
-            "clients_count": 0,
-            "errors": []
-        }
-        res = await awg.conn.run_command("docker ps --filter name=amnezia-awg2 --format '{{.Status}}'")
-        if 'Up' in res:
-            status["container_running"] = True
-            version = await awg.conn.run_command("awg version 2>/dev/null || echo 'unknown'")
-            status["version"] = version.strip()
-            clients = await awg.get_clients()
-            status["clients_count"] = len(clients)
+        status = await server.get_full_status()
         return status
     except Exception as e:
         logger.error(f"Failed to get status for server {server_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/servers/{server_id}/stop")
+async def stop_server_container(
+    server_id: int,
+    server: AmneziaWGServer = Depends(get_server),
+    admin: dict = Depends(get_current_admin)
+):
+    """Останавливает контейнер на сервере."""
+    try:
+        success = await server.stop_container()
+        if success:
+            return {"message": "Container stopped"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to stop container")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/servers/{server_id}/start")
+async def start_server_container(
+    server_id: int,
+    server: AmneziaWGServer = Depends(get_server),
+    admin: dict = Depends(get_current_admin)
+):
+    """Запускает контейнер на сервере."""
+    try:
+        success = await server.start_container()
+        if success:
+            return {"message": "Container started"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to start container")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/servers/{server_id}/restart")
+async def restart_server_container(
+    server_id: int,
+    server: AmneziaWGServer = Depends(get_server),
+    admin: dict = Depends(get_current_admin)
+):
+    """Перезапускает контейнер на сервере."""
+    try:
+        success = await server.restart_container()
+        if success:
+            return {"message": "Container restarted"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to restart container")
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------- WebSocket для установки сервера (временно заглушка) ----------

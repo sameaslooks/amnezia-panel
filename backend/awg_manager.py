@@ -84,13 +84,19 @@ class AmneziaWGServer:
             }
             result.append(client_data)
             if not client_info:
-                logger.debug(f"Client {pub_key[:8]}... not in DB, creating with default user_id=1")
+                private_key = ""
+                safe_name = pub_key.replace('/', '_')
+                saved = await self.conn.run_command(f"cat /opt/amnezia/client_configs/{safe_name}.conf 2>/dev/null || true")
+                priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', saved)
+                if priv_match:
+                    private_key = priv_match.group(1)
+                    logger.debug(f"Recovered private key from file for {pub_key[:8]}...")
                 await database.create_client_for_user(
                     user_id=1,
                     public_key=pub_key,
                     name=name,
                     ip=ip,
-                    private_key="",
+                    private_key=private_key,
                     server_id=self.server_id
                 )
         
@@ -138,6 +144,10 @@ AllowedIPs = {next_ip}
         )
 
         client_config = await self.get_client_config(public_key)
+        if client_config:
+            safe_name = public_key.replace('/', '_')
+            await self.conn.run_command("mkdir -p /opt/amnezia/client_configs", in_container=True)
+            await self.conn.write_file(f"/opt/amnezia/client_configs/{safe_name}.conf", client_config)
         normalized = self.normalize_config(new_config)
         if not await self._write_config(normalized):
             raise Exception("Failed to write config file")
@@ -243,25 +253,29 @@ AllowedIPs = {next_ip}
 
         client_data = await database.get_client_by_public_key(public_key)
         if not client_data or not client_data.get('private_key'):
-            saved = await self.conn.run_command(f"cat /opt/amnezia/client_configs/{public_key}.conf 2>/dev/null || true")
+            safe_name = public_key.replace('/', '_')
+            saved = await self.conn.run_command(f"cat /opt/amnezia/client_configs/{safe_name}.conf 2>/dev/null || true")
             priv_match = re.search(r'PrivateKey\s*=\s*(\S+)', saved)
             if priv_match:
                 private_key = priv_match.group(1)
-                await database.create_client_for_user(
-                    user_id=1,
-                    public_key=public_key,
-                    name='',
-                    ip=client_ip,
-                    private_key=private_key,
-                    server_id=self.server_id
-                )
-                logger.debug(f"Recovered private key from saved config for {public_key[:8]}...")
+                if client_data:
+                    await database.update_client_private_key(client_data['id'], private_key)
+                else:
+                    await database.create_client_for_user(
+                        user_id=1,
+                        public_key=public_key,
+                        name='',
+                        ip=client_ip,
+                        private_key=private_key,
+                        server_id=self.server_id
+                    )
+                logger.debug(f"Recovered private key from file for {public_key[:8]}...")
             else:
                 logger.error(f"Private key not found for client {public_key[:8]}...")
                 return ""
         else:
             private_key = client_data['private_key']
-
+        
         server_public = (await self.conn.run_command("cat /opt/amnezia/awg/server_public.key 2>/dev/null || true")).strip()
         if not server_public and server_params.get('private_key'):
             server_public = (await self.conn.run_command(f"echo '{server_params['private_key']}' | awg pubkey")).strip()
@@ -315,11 +329,22 @@ AllowedIPs = {next_ip}
     async def collect_traffic_stats(self):
         logger.debug(f"Collecting traffic stats for server {self.server_id}")
         traffic_bytes = await self.get_traffic_bytes()
-        logger.debug(f"Got traffic_bytes: {traffic_bytes}")
+        
         for pub_key, data in traffic_bytes.items():
-            logger.info(f"Updating {pub_key[:8]}: recv={data['received']}, sent={data['sent']}")
-            await update_traffic_usage(pub_key, data['received'], data['sent'], self)
-        logger.debug("Traffic stats collected")
+            delta_received, delta_sent = await database.get_traffic_delta(
+                pub_key, 
+                data['received'], 
+                data['sent']
+            )
+            
+            if delta_received > 0 or delta_sent > 0:
+                logger.info(f"Updating {pub_key[:8]}: delta recv={delta_received}, sent={delta_sent}")
+                await database.update_traffic_usage(
+                    pub_key, 
+                    delta_received, 
+                    delta_sent, 
+                    self
+                )
 
     async def block_client(self, public_key: str) -> bool:
         ip = await self._get_client_ip(public_key)
@@ -474,3 +499,73 @@ AllowedIPs = {next_ip}
             logger.debug(f"Removed {public_key[:8]}... from clientsTable")
         except Exception as e:
             logger.error(f"Failed to update clientsTable: {e}")
+
+    async def get_full_status(self) -> Dict:
+        """Возвращает полный статус сервера: онлайн, контейнер, версия, клиенты."""
+        status = {
+            "online": False,
+            "container_running": False,
+            "version": None,
+            "clients_count": 0,
+            "errors": []
+        }
+        
+        try:
+            await self.conn.run_command("echo 'ping'", in_container=False)
+            status["online"] = True
+            container_check = await self.conn.run_command(
+                "docker ps --filter name=amnezia-awg2 --format '{{.Status}}'", 
+                in_container=False
+            )
+            if 'Up' in container_check:
+                status["container_running"] = True
+                version = await self.conn.run_command(
+                    "docker exec amnezia-awg2 awg version 2>/dev/null || echo 'unknown'",
+                    in_container=False
+                )
+                status["version"] = version.strip()
+                try:
+                    clients = await self.get_clients()
+                    status["clients_count"] = len(clients)
+                except Exception as e:
+                    status["errors"].append(f"Failed to get clients: {str(e)}")
+        except Exception as e:
+            status["errors"].append(str(e))
+            logger.error(f"Failed to get full status for server {self.server_id}: {e}")
+        return status
+    
+    async def stop_container(self) -> bool:
+        """Останавливает контейнер AmneziaWG на сервере."""
+        try:
+            result = await self.conn.run_command(
+                "docker stop amnezia-awg2 2>/dev/null || true", 
+                in_container=False
+            )
+            logger.info(f"Container stopped on server {self.server_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to stop container: {e}")
+            return False
+
+    async def start_container(self) -> bool:
+        """Запускает контейнер AmneziaWG на сервере."""
+        try:
+            result = await self.conn.run_command(
+                "docker start amnezia-awg2 2>/dev/null || true", 
+                in_container=False
+            )
+            logger.info(f"Container started on server {self.server_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to start container: {e}")
+            return False
+
+    async def restart_container(self) -> bool:
+        """Перезапускает контейнер AmneziaWG."""
+        try:
+            await self.stop_container()
+            await self.start_container()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restart container: {e}")
+            return False
