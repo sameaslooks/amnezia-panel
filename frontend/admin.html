@@ -119,7 +119,6 @@
                         </div>
                     </div>
                 </div>
-
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-4">Traffic (last 30 days)</h3>
@@ -182,23 +181,6 @@
                             </template>
                             <div x-show="!dashboardStats.expiring_soon.length" class="text-sm text-gray-500">
                                 No expiring subscriptions
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bg-white rounded-lg shadow-md p-4">
-                        <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-                            <span>💤 Inactive Clients</span>
-                            <span class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded" x-text="dashboardStats.inactive_clients.length"></span>
-                        </h3>
-                        <div class="space-y-2">
-                            <template x-for="client in dashboardStats.inactive_clients.slice(0, 5)" :key="client.public_key">
-                                <div class="text-sm p-2 bg-gray-50 rounded">
-                                    <span class="font-medium" x-text="client.name"></span>
-                                    <span class="text-gray-500 text-xs block" x-text="'Last seen: ' + (client.handshake || 'Never')"></span>
-                                </div>
-                            </template>
-                            <div x-show="!dashboardStats.inactive_clients.length" class="text-sm text-gray-500">
-                                All clients active
                             </div>
                         </div>
                     </div>
@@ -915,7 +897,6 @@
                 top_clients: [],
                 issues: [],
                 expiring_soon: [],
-                inactive_clients: [],
                 traffic_history: []
             },
 
@@ -1727,12 +1708,33 @@
                     try {
                         const trafficData = this.dashboardStats.traffic_history;
                         const nonZeroData = trafficData.filter(d => d.bytes > 0);
+                        
                         if (nonZeroData.length === 0) {
                             console.log('No traffic data yet');
+                            // Очисти canvas и покажи сообщение
+                            const ctx = canvas.getContext('2d');
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            ctx.font = '14px Arial';
+                            ctx.fillStyle = '#666';
+                            ctx.textAlign = 'center';
+                            ctx.fillText('No traffic data yet', canvas.width/2, canvas.height/2);
                             return;
                         }
-                        const labels = nonZeroData.map(d => d.date);
-                        const data = nonZeroData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
+
+                        // Для одной точки добавим фиктивную вторую, чтобы график нарисовался
+                        let labels, data;
+                        if (nonZeroData.length === 1) {
+                            // Если только одна точка, дублируем её для отображения
+                            const single = nonZeroData[0];
+                            labels = [single.date, single.date]; // две одинаковые даты
+                            data = [
+                                (single.bytes / 1024 / 1024 / 1024).toFixed(2),
+                                (single.bytes / 1024 / 1024 / 1024).toFixed(2)
+                            ];
+                        } else {
+                            labels = nonZeroData.map(d => d.date);
+                            data = nonZeroData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
+                        }
 
                         this.chart = new Chart(ctx, {
                             type: 'line',
