@@ -162,18 +162,29 @@ async def update_user(user_id: int, username: str = None, password: str = None,
         await db.commit()
         logger.info(f"Updated user {user_id}")
 
-async def delete_user(user_id: int):
-    """Удаляет пользователя и всех его клиентов (включая историю трафика)."""
+async def delete_user(user_id: int, server_instances: dict = None):
+    """
+    Удаляет пользователя и всех его клиентов.
+    server_instances: словарь {server_id: AmneziaWGServer} для удаления клиентов с серверов
+    """
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT id FROM clients WHERE user_id = ?', (user_id,))
-        rows = await cursor.fetchall()
-        client_ids = [row[0] for row in rows]
-        for cid in client_ids:
-            await db.execute('DELETE FROM traffic_history WHERE client_id = ?', (cid,))
+        cursor = await db.execute('SELECT id, public_key, server_id FROM clients WHERE user_id = ?', (user_id,))
+        clients = await cursor.fetchall()
+        if server_instances:
+            for client_id, public_key, server_id in clients:
+                server = server_instances.get(server_id)
+                if server:
+                    try:
+                        await server.delete_client(public_key)
+                        logger.info(f"Клиент {public_key[:8]}... удалён с сервера {server_id}")
+                    except Exception as e:
+                        logger.error(f"Ошибка удаления клиента {public_key[:8]}... с сервера: {e}")
+        for client_id, _, _ in clients:
+            await db.execute('DELETE FROM traffic_history WHERE client_id = ?', (client_id,))
         await db.execute('DELETE FROM clients WHERE user_id = ?', (user_id,))
         await db.execute('DELETE FROM users WHERE id = ?', (user_id,))
         await db.commit()
-        logger.info(f"Deleted user {user_id} and {len(client_ids)} associated clients")
+        logger.info(f"Удалён пользователь {user_id} и {len(clients)} его клиентов")
 
 
 async def get_user_by_id(user_id: int) -> Optional[Dict]:

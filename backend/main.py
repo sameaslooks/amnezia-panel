@@ -316,7 +316,13 @@ async def update_user_endpoint(user_id: int, user: UserUpdate, admin: dict = Dep
 
 @app.delete("/api/users/{user_id}")
 async def delete_user_endpoint(user_id: int, admin: dict = Depends(get_current_admin)):
-    await db.delete_user(user_id)
+    clients = await db.get_user_clients(user_id)
+    server_instances = {}
+    for client in clients:
+        server_id = client['server_id']
+        if server_id not in server_instances:
+            server_instances[server_id] = await get_server(server_id=server_id, current_user=admin)
+    await db.delete_user(user_id, server_instances)
     return {"message": "User deleted"}
 
 @app.get("/api/user/profile")
