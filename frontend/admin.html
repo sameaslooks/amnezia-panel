@@ -128,22 +128,20 @@
                         </div>
                     </div>
                     <div class="bg-white rounded-lg shadow-md p-4">
-                        <h3 class="text-lg font-bold mb-4">Top 10 Clients by Traffic</h3>
+                        <h3 class="text-lg font-bold mb-4">Top 10 Users by Traffic</h3>
                         <div class="overflow-y-auto max-h-64">
                             <table class="w-full text-sm">
                                 <thead>
                                     <tr class="text-left text-gray-500">
-                                        <th class="pb-2">Client</th>
                                         <th class="pb-2">User</th>
                                         <th class="pb-2 text-right">Traffic</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <template x-for="client in dashboardStats.top_clients" :key="client.public_key">
+                                    <template x-for="user in dashboardStats.top_users" :key="user.user_id">
                                         <tr class="border-t">
-                                            <td class="py-1" x-text="client.name"></td>
-                                            <td class="py-1" x-text="client.username"></td>
-                                            <td class="py-1 text-right" x-text="formatBytes(client.traffic)"></td>
+                                            <td class="py-1" x-text="user.username"></td>
+                                            <td class="py-1 text-right" x-text="formatBytes(user.traffic)"></td>
                                         </tr>
                                     </template>
                                 </tbody>
@@ -930,8 +928,10 @@
                 }
                 await this.loadAllData();
                 await this.fetchUsers();
+                this.loadDashboardStats()
                 this.fetchTraffic();
                 setInterval(() => this.fetchTraffic(), 5000);
+                setInterval(() => this.loadDashboardStats(), 5000)
                 setInterval(() => {
                     this.servers.forEach(server => {
                         if (server.is_active) {
@@ -939,7 +939,6 @@
                         }
                     });
                 }, 30000);
-                this.loadDashboardStats();
             },
 
             async loadAllData() {
@@ -1239,11 +1238,10 @@
                                 clients_count: this.clients.filter(c => c.server_id === 1).length
                             } : null
                         }));
-                        this.servers.forEach(server => {
-                            if (server.is_active && server.id !== 1) {
-                                this.fetchServerStatus(server.id);
-                            }
-                        });
+                        const promises = this.servers
+                            .filter(s => s.is_active && s.id !== 1)
+                            .map(s => this.fetchServerStatus(s.id, true));
+                        await Promise.all(promises);
                     }
                 } catch (err) {
                     console.error('Failed to fetch servers:', err);
@@ -1251,19 +1249,26 @@
                 }
             },
 
-            async fetchServerStatus(serverId) {
+            async fetchServerStatus(serverId, retryOnError = false) {
                 const server = this.servers.find(s => s.id === serverId);
                 if (!server || !server.is_active) return;
+
                 try {
                     const response = await fetch(`/api/servers/${serverId}/status`, {
                         headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
                     if (response.ok) {
                         const status = await response.json();
-                        if (server) server.status = status;
+                        server.status = status;
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
                     }
                 } catch (err) {
-                    console.error('Failed to fetch server status');
+                    console.error(`Failed to fetch status for server ${serverId}:`, err);
+                    // Если нужен повтор, устанавливаем таймер
+                    if (retryOnError) {
+                        setTimeout(() => this.fetchServerStatus(serverId, false), 5000);
+                    }
                 }
             },
 
@@ -1678,9 +1683,7 @@
                     if (response.ok) {
                         const stats = await response.json();
                         this.dashboardStats = stats;
-                        setTimeout(() => {
-                            this.renderTrafficChart();
-                        }, 100);
+                        this.renderTrafficChart();
                     }
                 } catch (err) {
                     console.error('Error loading dashboard stats:', err);
@@ -1688,37 +1691,32 @@
             },
 
             renderTrafficChart() {
-                if (this.activeTab !== 'dashboard') {
-                    console.log('Not on dashboard, skipping chart render');
-                    return;
-                }
+                if (this.activeTab !== 'dashboard') return;
+
+                // Уничтожаем старый график, если есть
                 if (this.chart) {
                     this.chart.destroy();
                     this.chart = null;
                 }
+
                 if (!this.dashboardStats.traffic_history || this.dashboardStats.traffic_history.length === 0) {
                     console.log('No traffic history data yet');
                     return;
                 }
-                setTimeout(() => {
-                    const canvas = document.getElementById('trafficChart');
+
+                requestAnimationFrame(() => {
+                    const canvas = this.$refs.trafficChart;
                     if (!canvas) {
-                        console.error('Canvas element not found');
+                        console.log('trafficChart ref not found, retrying...');
+                        setTimeout(() => this.renderTrafficChart(), 100);
                         return;
                     }
-                    const rect = canvas.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0) {
-                        console.log('Canvas has zero size, waiting...');
-                        setTimeout(() => this.renderTrafficChart(), 200);
-                        return;
-                    }
+
                     const ctx = canvas.getContext('2d');
-                    if (!ctx) {
-                        console.error('Could not get canvas context');
-                        return;
-                    }
+                    if (!ctx) return;
+
                     try {
-                        const trafficData = this.dashboardStats.traffic_history || [];
+                        const trafficData = this.dashboardStats.traffic_history;
                         const labels = trafficData.map(d => d.date);
                         const data = trafficData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
 
@@ -1753,11 +1751,10 @@
                                 }
                             }
                         });
-                        console.log('Chart rendered successfully');
                     } catch (err) {
                         console.error('Error creating chart:', err);
                     }
-                }, 50);
+                });
             },
 
             destroyChart() {

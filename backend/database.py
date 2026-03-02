@@ -469,6 +469,7 @@ async def get_all_clients_with_user_info(include_deleted: bool = False) -> List[
                 c.server_name,
                 c.is_active,
                 c.user_id,
+                c.created_at,
                 u.username,
                 u.traffic_limit_bytes,
                 u.traffic_used_bytes,
@@ -648,7 +649,7 @@ async def get_traffic_today() -> int:
 async def get_traffic_history(days: int = 30) -> List[Dict]:
     history = []
     async with aiosqlite.connect(DB_PATH) as db:
-        for i in range(days, 0, -1):
+        for i in range(days - 1, 0, -1):
             date = datetime.now() - timedelta(days=i)
             next_date = date + timedelta(days=1)
             date_str = date.strftime('%Y-%m-%d')
@@ -665,6 +666,18 @@ async def get_traffic_history(days: int = 30) -> List[Dict]:
                 "date": date_str,
                 "bytes": bytes_total
             })
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_str = today_start.strftime('%Y-%m-%d')
+        cursor = await db.execute('''
+            SELECT SUM(total_bytes) FROM traffic_history
+            WHERE recorded_at >= ?
+        ''', (today_start.strftime('%Y-%m-%d %H:%M:%S'),))
+        row = await cursor.fetchone()
+        bytes_today = row[0] if row and row[0] else 0
+        history.append({
+            "date": today_str,
+            "bytes": bytes_today
+        })
     return history
 
 
