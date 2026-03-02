@@ -299,7 +299,7 @@ AllowedIPs = {next_ip}
                 try:
                     received = data["received"]
                     sent = data["sent"]
-                    await database.update_traffic(pub_key, received, sent, self.server_id)
+                    await database.update_traffic(pub_key, received, sent, self)
                 except Exception:
                     logger.exception(
                         f"Failed to collect traffic for {pub_key[:8]} on server {self.server_id}"

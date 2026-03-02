@@ -45,7 +45,6 @@ async def get_dashboard_stats(server_statuses: List[Dict] = None) -> Dict[str, A
             except:
                 pass
 
-    inactive_clients = _get_inactive_clients(clients)
     active_now = _get_active_now(clients, traffic_data)
     traffic_history = await db.get_traffic_history(days=30)
 
@@ -57,7 +56,6 @@ async def get_dashboard_stats(server_statuses: List[Dict] = None) -> Dict[str, A
         "top_users": top_users,
         "issues": issues,
         "expiring_soon": expiring_soon,
-        "inactive_clients": inactive_clients,
         "traffic_history": traffic_history
     }
 
@@ -164,76 +162,6 @@ def _get_top_users(users: List[Dict], limit: int = 10) -> List[Dict]:
         }
         for u in sorted_users[:limit]
     ]
-
-
-def _get_inactive_clients(clients: List[Dict]) -> List[Dict]:
-    inactive = []
-    seen_keys = set()
-    now = datetime.now()
-    day_ago = now - timedelta(days=1)
-    for client in clients:
-        if not client.get('is_active'):
-            continue
-        public_key = client['public_key']
-        if public_key in seen_keys:
-            continue
-        created_at = client.get('created_at')
-        if created_at:
-            try:
-                created = datetime.fromisoformat(created_at.replace(' ', 'T'))
-                if created > day_ago:
-                    continue
-            except:
-                pass
-        handshake = client.get('handshake')
-        if not handshake or handshake == 'Never':
-            inactive.append({
-                "public_key": public_key,
-                "name": client.get('name', 'Unknown'),
-                "handshake": 'Never'
-            })
-            seen_keys.add(public_key)
-            continue
-        try:
-            if 'second' in handshake:
-                seconds = int(handshake.split()[0])
-                if seconds > 604800:
-                    inactive.append({
-                        "public_key": public_key,
-                        "name": client.get('name', 'Unknown'),
-                        "handshake": handshake
-                    })
-                    seen_keys.add(public_key)
-            elif 'minute' in handshake:
-                minutes = int(handshake.split()[0])
-                if minutes > 10080:
-                    inactive.append({
-                        "public_key": public_key,
-                        "name": client.get('name', 'Unknown'),
-                        "handshake": handshake
-                    })
-                    seen_keys.add(public_key)
-            elif 'hour' in handshake:
-                hours = int(handshake.split()[0])
-                if hours > 168:
-                    inactive.append({
-                        "public_key": public_key,
-                        "name": client.get('name', 'Unknown'),
-                        "handshake": handshake
-                    })
-                    seen_keys.add(public_key)
-            elif 'day' in handshake:
-                days = int(handshake.split()[0])
-                if days > 7:
-                    inactive.append({
-                        "public_key": public_key,
-                        "name": client.get('name', 'Unknown'),
-                        "handshake": handshake
-                    })
-                    seen_keys.add(public_key)
-        except:
-            pass
-    return inactive
 
 
 def _get_active_now(clients: List[Dict], traffic_data: List[Dict] = None) -> int:
