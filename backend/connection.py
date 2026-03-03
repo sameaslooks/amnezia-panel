@@ -36,13 +36,21 @@ class LocalConnection(Connection):
         logger.debug(f"LocalConnection initialized with container {container_name}")
 
     async def run_command(self, command: str, in_container: bool = True) -> str:
-        logger.debug(f"Local run: {command}")
+        logger.debug(f"Local run: {command} (in_container={in_container})")
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "exec", self.container_name, "bash", "-c", command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            if in_container:
+                proc = await asyncio.create_subprocess_exec(
+                    "docker", "exec", self.container_name, "bash", "-c", command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+            else:
+                # Выполняем команду на хосте
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", "-c", command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
             stdout, stderr = await proc.communicate()
             if stderr:
                 logger.debug(f"Command stderr: {stderr.decode().strip()}")

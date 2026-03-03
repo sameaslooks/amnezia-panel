@@ -103,6 +103,7 @@ class AmneziaWGServer:
         logger.info(f"Adding new client with name '{name}' for user {user_id} on server {self.server_id}")
         if not await database.can_create_config(user_id):
             raise ValueError("Config limit reached for this user")
+        
         private_key = (await self.conn.run_command("awg genkey")).strip()
         public_key = (await self.conn.run_command(f"echo '{private_key}' | awg pubkey")).strip()
         if not public_key:
@@ -118,11 +119,13 @@ class AmneziaWGServer:
 PublicKey = {public_key}
 PresharedKey = {psk}
 AllowedIPs = {next_ip}
-"""
+    """
         new_config = config.rstrip() + "\n" + peer_section
-        if not await self._write_config(new_config):
+        normalized = awg_utils.normalize_config(new_config)  # нормализуем до записи
+
+        if not await self._write_config(normalized):
             raise Exception("Failed to write config file")
-        await self._syncconf()
+        await self._syncconf()  # применяем изменения к работающему интерфейсу
 
         await database.create_client_for_user(
             user_id=user_id,
@@ -138,9 +141,6 @@ AllowedIPs = {next_ip}
             safe_name = public_key.replace('/', '_')
             await self.conn.run_command("mkdir -p /opt/amnezia/client_configs", in_container=True)
             await self.conn.write_file(f"/opt/amnezia/client_configs/{safe_name}.conf", client_config)
-        normalized = awg_utils.normalize_config(new_config)
-        if not await self._write_config(normalized):
-            raise Exception("Failed to write config file")
 
         logger.info(f"Client {name} ({public_key[:8]}...) added with IP {next_ip}")
         return {
@@ -398,10 +398,22 @@ AllowedIPs = {next_ip}
         if isinstance(self.conn, SSHConnection):
             return self.conn.host
         else:
-            result = await self.conn.run_command("curl -s ifconfig.me 2>/dev/null || echo 'YOUR_SERVER_IP'")
+            # Для локального подключения выполняем curl на хосте, а не в контейнере
+            result = await self.conn.run_command("curl -s ifconfig.me", in_container=False)
             ip = result.strip()
-            logger.debug(f"Detected server IP: {ip}")
-            return ip
+            if ip:
+                logger.debug(f"Detected server IP: {ip}")
+                return ip
+            
+            # Если не сработало, пробуем альтернативный сервис
+            result = await self.conn.run_command("curl -s icanhazip.com", in_container=False)
+            ip = result.strip()
+            if ip:
+                return ip
+                
+            # Если всё ещё нет IP, возвращаем fallback, но логируем ошибку
+            logger.error("Could not detect server IP using curl")
+            return "YOUR_SERVER_IP"
 
     async def _get_client_ip(self, public_key: str) -> Optional[str]:
         config = await self._read_config()
