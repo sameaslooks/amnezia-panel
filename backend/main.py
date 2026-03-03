@@ -184,7 +184,15 @@ async def get_traffic(
 
 
 @app.get("/api/user-config")
-async def get_user_config(public_key: str, server: AmneziaWGServer = Depends(get_server)):
+async def get_user_config(
+    public_key: str,
+    server_id: int = 1,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Получение конфигурации клиента по публичному ключу.
+    """
+    server = await get_server(server_id, current_user)
     config = await server.get_client_config(public_key)
     if not config:
         raise HTTPException(status_code=404, detail="Client not found")
