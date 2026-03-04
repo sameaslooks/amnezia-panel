@@ -1,3 +1,4 @@
+# auth.py
 import jwt
 import os
 from datetime import datetime, timedelta
@@ -13,16 +14,16 @@ if not SECRET_KEY:
 if SECRET_KEY == "your-secret-key-change-this":
     logger.warning("Using default JWT secret! Set JWT_SECRET in production!")
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяет пароль против хеша."""
     return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
+
 def get_password_hash(password: str) -> str:
-    """Возвращает bcrypt хеш пароля."""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
+
 async def authenticate_user(username: str, password: str):
-    """Проверяет учётные данные пользователя."""
     from database import get_user_by_username
     user = await get_user_by_username(username)
     if user and verify_password(password, user["password_hash"]):
@@ -30,6 +31,7 @@ async def authenticate_user(username: str, password: str):
         return user
     logger.warning(f"Failed authentication attempt for user {username}")
     return None
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -41,6 +43,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     logger.debug(f"Created access token for {data.get('sub')}")
     return token
+
 
 def decode_token(token: str):
     try:
