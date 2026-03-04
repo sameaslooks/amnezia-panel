@@ -1,14 +1,15 @@
+# tasks.py
 import asyncio
 from logger import logger
 import database as db
 from connection import LocalConnection, SSHConnection
 from awg_manager import AmneziaWGServer
 
+
 async def collect_stats_periodically(interval: int = 60):
     while True:
         logger.debug("Starting periodic stats collection")
         try:
-            await db.check_all_limits()
             servers = await db.get_all_servers_full()
             for srv in servers:
                 if not srv['is_active']:
@@ -28,6 +29,8 @@ async def collect_stats_periodically(interval: int = 60):
                         )
                     server = AmneziaWGServer(conn, server_id=srv['id'])
                     await server.collect_traffic_stats()
+                    # После обновления трафика проверяем лимиты для этого сервера
+                    await db.check_all_limits(server_instance=server)
                     await conn.close()
                 except Exception as e:
                     logger.error(f"Stats collection failed for server {srv['id']}: {e}", exc_info=True)

@@ -1,3 +1,4 @@
+# connection.py
 import abc
 import asyncio
 import subprocess
@@ -7,9 +8,10 @@ import asyncssh
 from typing import Optional
 from logger import logger
 
+
 class Connection(abc.ABC):
     """Абстрактный класс для выполнения команд на сервере AmneziaWG."""
-    
+
     @abc.abstractmethod
     async def run_command(self, command: str) -> str:
         """Выполняет команду и возвращает stdout."""
@@ -28,19 +30,27 @@ class Connection(abc.ABC):
 
 class LocalConnection(Connection):
     """Подключение к локальному Docker-контейнеру."""
-    
+
     def __init__(self, container_name: str = "amnezia-awg2"):
         self.container_name = container_name
         logger.debug(f"LocalConnection initialized with container {container_name}")
 
     async def run_command(self, command: str, in_container: bool = True) -> str:
-        logger.debug(f"Local run: {command}")
+        logger.debug(f"Local run: {command} (in_container={in_container})")
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "exec", self.container_name, "bash", "-c", command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            if in_container:
+                proc = await asyncio.create_subprocess_exec(
+                    "docker", "exec", self.container_name, "bash", "-c", command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+            else:
+                # Выполняем команду на хосте
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", "-c", command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
             stdout, stderr = await proc.communicate()
             if stderr:
                 logger.debug(f"Command stderr: {stderr.decode().strip()}")
@@ -49,7 +59,7 @@ class LocalConnection(Connection):
             logger.error(f"Local command error: {e}")
             return ""
 
-    async def write_file(self, path: str, content: str) -> bool:
+    async def write_file(self, path: str, content: str, in_container: bool = True) -> bool:
         logger.debug(f"Local write file {path} ({len(content)} bytes)")
         try:
             cmd = f"cat > {path} << 'EOF'\n{content}\nEOF"
@@ -75,7 +85,7 @@ class LocalConnection(Connection):
 
 class SSHConnection(Connection):
     """Подключение к удалённому серверу через SSH."""
-    
+
     def __init__(
         self,
         host: str,
@@ -105,22 +115,28 @@ class SSHConnection(Connection):
             'username': self.username,
             'known_hosts': None
         }
-        if self.private_key:
-            with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
-                f.write(self.private_key)
-                self._temp_key_path = f.name
-            os.chmod(self._temp_key_path, 0o600)
-            kwargs['client_keys'] = [self._temp_key_path]
-            logger.debug("Using private key authentication")
-        elif self.password:
-            kwargs['password'] = self.password
-            kwargs['client_keys'] = None
-            logger.debug("Using password authentication")
+        temp_key_created = False
         try:
+            if self.private_key:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                    f.write(self.private_key)
+                    self._temp_key_path = f.name
+                os.chmod(self._temp_key_path, 0o600)
+                kwargs['client_keys'] = [self._temp_key_path]
+                temp_key_created = True
+                logger.debug("Using private key authentication")
+            elif self.password:
+                kwargs['password'] = self.password
+                kwargs['client_keys'] = None
+                logger.debug("Using password authentication")
+
             self._conn = await asyncssh.connect(**kwargs)
             logger.info("SSH connection established")
         except Exception as e:
             logger.error(f"SSH connection error: {e}")
+            if temp_key_created and self._temp_key_path and os.path.exists(self._temp_key_path):
+                os.unlink(self._temp_key_path)
+                self._temp_key_path = None
             raise
 
     async def run_command(self, command: str, in_container: bool = True) -> str:
@@ -140,34 +156,24 @@ class SSHConnection(Connection):
         return result.stdout
 
     async def write_file(self, path: str, content: str, in_container: bool = True) -> bool:
-        """
-        Записывает содержимое в файл.
-        :param path: путь на удалённой системе
-        :param content: содержимое
-        :param in_container: если True, путь считается внутри контейнера, иначе – на хосте
-        """
         await self._connect()
         logger.debug(f"SSH write file {'(container) ' if in_container else '(host) '}{path} ({len(content)} bytes)")
 
-        # Создаём временный локальный файл
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             f.write(content)
             local_path = f.name
 
         remote_tmp = f"/tmp/awg_{os.path.basename(local_path)}"
         try:
-            # Копируем на удалённый сервер во временную папку
             await asyncssh.scp(local_path, (self._conn, remote_tmp))
 
             if in_container:
-                # Перемещаем внутрь контейнера
                 docker_cmd = f"docker cp {remote_tmp} amnezia-awg2:{path}"
                 if self.sudo_password:
                     docker_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
                 result = await self._conn.run(docker_cmd)
                 success = result.returncode == 0
             else:
-                # На хосте: создаём директорию и перемещаем файл через sudo
                 mkdir_cmd = f"sudo mkdir -p {os.path.dirname(path)}"
                 if self.sudo_password:
                     mkdir_cmd = f"echo '{self.sudo_password}' | sudo -S {mkdir_cmd}"
@@ -179,7 +185,6 @@ class SSHConnection(Connection):
                 result = await self._conn.run(mv_cmd)
                 success = result.returncode == 0
 
-            # Удаляем временный файл на сервере
             await self._conn.run(f"rm -f {remote_tmp}")
 
             if success:

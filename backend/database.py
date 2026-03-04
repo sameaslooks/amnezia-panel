@@ -1,11 +1,14 @@
+# database.py
 import aiosqlite
 import os
-from datetime import datetime
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 import bcrypt
 from logger import logger
 
 DB_PATH = "/app/data/amnezia.db"
+
 
 async def init_db():
     """Инициализация БД (создание таблиц, если нет)."""
@@ -19,36 +22,45 @@ async def init_db():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 role TEXT DEFAULT 'user',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                traffic_limit_bytes INTEGER,
+                traffic_used_bytes INTEGER DEFAULT 0,
+                expiry_date TIMESTAMP,
+                config_limit INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         # Таблица клиентов
         await db.execute('''
             CREATE TABLE IF NOT EXISTS clients (
-                public_key TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                public_key TEXT UNIQUE NOT NULL,
                 name TEXT,
                 ip TEXT,
                 private_key TEXT,
-                traffic_limit_bytes INTEGER,
-                traffic_used_bytes INTEGER DEFAULT 0,
-                expiry_date TIMESTAMP,
-                is_active BOOLEAN DEFAULT 1,
+                last_received INTEGER DEFAULT 0,
+                last_sent INTEGER DEFAULT 0,
                 server_id INTEGER DEFAULT 1,
                 server_name TEXT DEFAULT 'local',
+                is_active BOOLEAN DEFAULT 1,
+                is_deleted BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (server_id) REFERENCES servers(id)
             )
         ''')
         # Таблица истории трафика
         await db.execute('''
             CREATE TABLE IF NOT EXISTS traffic_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                public_key TEXT,
+                client_id INTEGER NOT NULL,
                 bytes_received INTEGER,
                 bytes_sent INTEGER,
                 total_bytes INTEGER,
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (public_key) REFERENCES clients(public_key)
+                FOREIGN KEY (client_id) REFERENCES clients(id)
             )
         ''')
         # Таблица серверов
@@ -92,17 +104,21 @@ async def init_db():
             await db.commit()
             logger.info("Created default admin user")
 
+
 # ---------- Пользователи ----------
 async def get_user_by_username(username: str) -> Optional[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT username, password_hash, role FROM users WHERE username = ?', (username,))
+        cursor = await db.execute('''
+            SELECT id, username, password_hash, role, traffic_limit_bytes,
+                   traffic_used_bytes, expiry_date, config_limit, created_at
+            FROM users WHERE username = ?
+        ''', (username,))
         row = await cursor.fetchone()
         if row:
-            logger.debug(f"Found user {username}")
             return dict(row)
-        logger.debug(f"User {username} not found")
         return None
+
 
 async def create_user(username: str, password: str, role: str = 'user') -> bool:
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -117,15 +133,22 @@ async def create_user(username: str, password: str, role: str = 'user') -> bool:
             logger.warning(f"Attempt to create duplicate user {username}")
             return False
 
+
 async def get_all_users() -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC')
+        cursor = await db.execute('''
+            SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes, 
+                   expiry_date, config_limit, created_at
+            FROM users ORDER BY created_at DESC
+        ''')
         rows = await cursor.fetchall()
         logger.debug(f"Fetched {len(rows)} users")
         return [dict(row) for row in rows]
 
-async def update_user(user_id: int, username: str = None, password: str = None, role: str = None):
+
+async def update_user(user_id: int, username: str = None, password: str = None, 
+                      role: str = None, config_limit: int = None):
     async with aiosqlite.connect(DB_PATH) as db:
         if username:
             await db.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
@@ -134,136 +157,210 @@ async def update_user(user_id: int, username: str = None, password: str = None, 
             await db.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, user_id))
         if role:
             await db.execute('UPDATE users SET role = ? WHERE id = ?', (role, user_id))
+        if config_limit is not None:
+            await db.execute('UPDATE users SET config_limit = ? WHERE id = ?', (config_limit, user_id))
         await db.commit()
         logger.info(f"Updated user {user_id}")
 
-async def delete_user(user_id: int):
+async def delete_user(user_id: int, server_instances: dict = None):
+    """
+    Удаляет пользователя и всех его клиентов.
+    server_instances: словарь {server_id: AmneziaWGServer} для удаления клиентов с серверов
+    """
     async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT id, public_key, server_id FROM clients WHERE user_id = ?', (user_id,))
+        clients = await cursor.fetchall()
+        if server_instances:
+            for client_id, public_key, server_id in clients:
+                server = server_instances.get(server_id)
+                if server:
+                    try:
+                        await server.delete_client(public_key)
+                        logger.info(f"Клиент {public_key[:8]}... удалён с сервера {server_id}")
+                    except Exception as e:
+                        logger.error(f"Ошибка удаления клиента {public_key[:8]}... с сервера: {e}")
+        for client_id, _, _ in clients:
+            await db.execute('DELETE FROM traffic_history WHERE client_id = ?', (client_id,))
+        await db.execute('DELETE FROM clients WHERE user_id = ?', (user_id,))
         await db.execute('DELETE FROM users WHERE id = ?', (user_id,))
         await db.commit()
-        logger.info(f"Deleted user {user_id}")
+        logger.info(f"Удалён пользователь {user_id} и {len(clients)} его клиентов")
 
-# ---------- Клиенты ----------
-async def get_client(public_key: str) -> Optional[Dict]:
+
+async def get_user_by_id(user_id: int) -> Optional[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
-            SELECT name, ip, private_key, traffic_limit_bytes, traffic_used_bytes,
-                   expiry_date, is_active, server_id, server_name
-            FROM clients WHERE public_key = ?
-        ''', (public_key,))
+            SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes,
+                   expiry_date, config_limit, created_at
+            FROM users WHERE id = ?
+        ''', (user_id,))
         row = await cursor.fetchone()
         if row:
-            logger.debug(f"Found client {public_key[:8]}...")
+            logger.debug(f"Found user by ID {user_id}")
             return dict(row)
-        logger.debug(f"Client {public_key[:8]}... not found")
+        logger.debug(f"User ID {user_id} not found")
         return None
 
-async def upsert_client(public_key: str, name: str, ip: str, server_id: int = 1):
-    """Создаёт или обновляет запись клиента (имя и IP)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Получаем имя сервера
-        cursor = await db.execute('SELECT name FROM servers WHERE id = ?', (server_id,))
-        row = await cursor.fetchone()
-        server_name = row[0] if row else 'local'
 
+async def update_user_traffic_used(user_id: int, bytes_used: int):
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
-            INSERT INTO clients (public_key, name, ip, server_id, server_name, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(public_key) DO UPDATE SET
-                name = excluded.name,
-                ip = excluded.ip,
-                server_id = excluded.server_id,
-                server_name = excluded.server_name,
+            UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?,
                 updated_at = CURRENT_TIMESTAMP
-        ''', (public_key, name, ip, server_id, server_name))
+            WHERE id = ?
+        ''', (bytes_used, user_id))
         await db.commit()
+        logger.debug(f"Updated traffic for user {user_id}: +{bytes_used} bytes")
 
-async def create_client(public_key: str, name: str, ip: str, private_key: str = "", server_id: int = 1):
+
+async def check_user_limits(user_id: int) -> tuple[bool, str]:
     async with aiosqlite.connect(DB_PATH) as db:
-        # Получаем имя сервера
-        cursor = await db.execute('SELECT name FROM servers WHERE id = ?', (server_id,))
+        cursor = await db.execute('''
+            SELECT traffic_limit_bytes, traffic_used_bytes, expiry_date
+            FROM users WHERE id = ?
+        ''', (user_id,))
         row = await cursor.fetchone()
-        server_name = row[0] if row else 'local'
-        await db.execute('''
-            INSERT INTO clients (public_key, name, ip, private_key, server_id, server_name, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(public_key) DO UPDATE SET
-                name=excluded.name,
-                ip=excluded.ip,
-                private_key=CASE WHEN excluded.private_key IS NULL OR excluded.private_key = '' THEN clients.private_key ELSE excluded.private_key END,
-                server_id=excluded.server_id,
-                server_name=excluded.server_name,
-                updated_at=CURRENT_TIMESTAMP
-        ''', (public_key, name, ip, private_key, server_id, server_name))
-        await db.commit()
-        logger.info(f"Created/updated client {name} ({public_key[:8]}...) on server {server_name}")
-
-async def set_client_limit(public_key: str, limit_bytes: int):
-    logger.info(f"Setting limit for {public_key[:8]}... to {limit_bytes} bytes")
-    async with aiosqlite.connect(DB_PATH) as db:
-        if limit_bytes <= 0:
-            await db.execute('''
-                UPDATE clients SET traffic_limit_bytes = NULL, traffic_used_bytes = 0,
-                    is_active = 1, updated_at = CURRENT_TIMESTAMP
-                WHERE public_key = ?
-            ''', (public_key,))
-            logger.info(f"Limit removed for {public_key[:8]}..., client activated")
-        else:
-            await db.execute('''
-                UPDATE clients SET traffic_limit_bytes = ?, traffic_used_bytes = 0,
-                    is_active = 1, updated_at = CURRENT_TIMESTAMP
-                WHERE public_key = ?
-            ''', (limit_bytes, public_key))
-            logger.info(f"Limit set to {limit_bytes} for {public_key[:8]}..., client activated")
-        await db.commit()
-
-async def set_client_expiry(public_key: str, expiry_date: Optional[str] = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        is_active = 1
+        if not row:
+            return False, "User not found"
+        limit_bytes, used_bytes, expiry_date = row
+        if limit_bytes and used_bytes > limit_bytes:
+            return False, "Traffic limit exceeded"
         if expiry_date:
             try:
                 expiry = datetime.fromisoformat(expiry_date.replace(' ', 'T'))
                 if datetime.now() > expiry:
-                    is_active = 0
+                    return False, "Subscription expired"
             except Exception as e:
-                logger.error(f"Invalid expiry date {expiry_date}: {e}")
-        await db.execute('''
-            UPDATE clients SET expiry_date = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE public_key = ?
-        ''', (expiry_date, is_active, public_key))
-        await db.commit()
-        logger.info(f"Set expiry {expiry_date} for {public_key[:8]}...")
+                logger.error(f"Error parsing expiry date: {e}")
+        return True, "OK"
 
-async def update_traffic_usage(public_key: str, received: int, sent: int, server_instance=None):
-    logger.info(f"Updating traffic for {public_key[:8]}: recv={received}, sent={sent}")
-    total = received + sent
+
+async def can_create_config(user_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute('''
-            SELECT traffic_limit_bytes, traffic_used_bytes, is_active
-            FROM clients WHERE public_key = ?
-        ''', (public_key,)) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                logger.warning(f"Client {public_key[:8]} not found in DB, skipping traffic update")
-                return
-            limit_bytes, used_bytes, is_active = row
+        cursor = await db.execute('SELECT role, config_limit FROM users WHERE id = ?', (user_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return False
+        role, config_limit = row
+        if role == 'admin':
+            return True
+        cursor = await db.execute('''
+            SELECT COUNT(*) FROM clients 
+            WHERE user_id = ? AND is_deleted = 0
+        ''', (user_id,))
+        current_configs = (await cursor.fetchone())[0]
+        return current_configs < config_limit
 
-        new_used = max(total, used_bytes)
-        await db.execute('UPDATE clients SET traffic_used_bytes = ? WHERE public_key = ?', (new_used, public_key))
-        await db.execute('''
-            INSERT INTO traffic_history (public_key, bytes_received, bytes_sent, total_bytes)
-            VALUES (?, ?, ?, ?)
-        ''', (public_key, received, sent, total))
-        await db.commit()
-        logger.info(f"Updated {public_key[:8]} used to {new_used}")
 
-        if limit_bytes and new_used > limit_bytes and is_active:
-            await db.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (public_key,))
+async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT id FROM clients WHERE user_id = ?', (user_id,))
+        rows = await cursor.fetchall()
+        client_ids = [r[0] for r in rows]
+        if not client_ids:
+            return {"total_received": 0, "total_sent": 0, "total": 0, "by_client": []}
+        placeholders = ','.join('?' for _ in client_ids)
+        query = f'''
+            SELECT SUM(bytes_received), SUM(bytes_sent)
+            FROM traffic_history
+            WHERE client_id IN ({placeholders}) AND recorded_at >= datetime('now', ?)
+        '''
+        params = client_ids + [f'-{days} days']
+        cursor = await db.execute(query, params)
+        row = await cursor.fetchone()
+        total_recv = row[0] or 0
+        total_sent = row[1] or 0
+        detailed = []
+        for cid in client_ids:
+            cursor = await db.execute('SELECT name FROM clients WHERE id = ?', (cid,))
+            name_row = await cursor.fetchone()
+            name = name_row[0] if name_row else 'Unknown'
+
+            cursor = await db.execute('''
+                SELECT SUM(bytes_received), SUM(bytes_sent)
+                FROM traffic_history
+                WHERE client_id = ? AND recorded_at >= datetime('now', ?)
+            ''', (cid, f'-{days} days'))
+            row2 = await cursor.fetchone()
+            recv = row2[0] or 0
+            sent = row2[1] or 0
+            detailed.append({
+                'client_id': cid,
+                'name': name,
+                'received': recv,
+                'sent': sent,
+                'total': recv + sent
+            })
+        return {
+            'total_received': total_recv,
+            'total_sent': total_sent,
+            'total': total_recv + total_sent,
+            'by_client': detailed
+        }
+
+
+# ---------- Клиенты ----------
+async def update_traffic(public_key: str, received: int, sent: int, server_instance=None):
+    client = await get_client_by_public_key(public_key)
+    if not client:
+        return
+
+    client_id = client['id']
+    user_id = client['user_id']
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Получаем последние сохранённые значения
+        cursor = await db.execute(
+            'SELECT last_received, last_sent FROM clients WHERE id = ?',
+            (client_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            last_received, last_sent = row
+        else:
+            last_received = last_sent = 0
+
+        # Проверка на сброс счётчиков (перезапуск контейнера)
+        if received < last_received or sent < last_sent:
+            # Просто обновляем последние значения, без записи в историю
+            await db.execute(
+                'UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
+                (received, sent, client_id)
+            )
             await db.commit()
-            logger.warning(f"Client {public_key[:8]} exceeded limit, deactivating")
-            if server_instance:
-                await server_instance.block_client(public_key)
+            logger.debug(f"Counter reset for client {client_id}, updated last values")
+            return
+
+        delta_received = received - last_received
+        delta_sent = sent - last_sent
+
+        if delta_received > 0 or delta_sent > 0:
+            # Вставляем дельту в историю
+            await db.execute('''
+                INSERT INTO traffic_history (client_id, bytes_received, bytes_sent, total_bytes)
+                VALUES (?, ?, ?, ?)
+            ''', (client_id, delta_received, delta_sent, delta_received + delta_sent))
+
+            # Обновляем суммарный трафик пользователя
+            await db.execute('''
+                UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?
+                WHERE id = ?
+            ''', (delta_received + delta_sent, user_id))
+
+        # Всегда обновляем последние значения
+        await db.execute(
+            'UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
+            (received, sent, client_id)
+        )
+        await db.commit()
+
+    # Проверка лимитов после обновления
+    ok, reason = await check_user_limits(user_id)
+    if not ok:
+        logger.warning(f"User {user_id} limit exceeded: {reason}, deactivating all clients")
+        await deactivate_user_clients(user_id, server_instance)
+
 
 async def get_all_clients(server_id: Optional[int] = None) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -284,23 +381,169 @@ async def get_all_clients(server_id: Optional[int] = None) -> List[Dict]:
         logger.debug(f"Fetched {len(rows)} clients")
         return [dict(row) for row in rows]
 
+
+async def get_client_id_by_public_key(public_key: str) -> Optional[int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT id FROM clients WHERE public_key = ?', (public_key,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
+async def deactivate_user_clients(user_id: int, server_instance=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT public_key FROM clients WHERE user_id = ?', (user_id,))
+        rows = await cursor.fetchall()
+        for (pub_key,) in rows:
+            await db.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (pub_key,))
+            if server_instance:
+                await server_instance.block_client(pub_key)
+        await db.commit()
+        logger.info(f"Deactivated all clients for user {user_id}")
+
+
 async def activate_client(public_key: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('UPDATE clients SET is_active = 1 WHERE public_key = ?', (public_key,))
         await db.commit()
         logger.info(f"Activated client {public_key[:8]}...")
 
-async def deactivate_client(public_key: str):
+
+async def deactivate_client(client_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (public_key,))
+        await db.execute('UPDATE clients SET is_active = 0 WHERE id = ?', (client_id,))
         await db.commit()
-        logger.info(f"Deactivated client {public_key[:8]}...")
+        logger.info(f"Client {client_id} deactivated")
+
 
 async def reset_traffic(public_key: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('UPDATE clients SET traffic_used_bytes = 0 WHERE public_key = ?', (public_key,))
         await db.commit()
         logger.info(f"Reset traffic for client {public_key[:8]}...")
+
+
+async def delete_traffic_history_by_client(client_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('DELETE FROM traffic_history WHERE client_id = ?', (client_id,))
+        await db.commit()
+        logger.debug(f"Deleted traffic history for client {client_id}")
+
+
+async def delete_client_by_id(client_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('DELETE FROM traffic_history WHERE client_id = ?', (client_id,))
+        await db.execute('DELETE FROM clients WHERE id = ?', (client_id,))
+        await db.commit()
+        logger.info(f"Deleted client {client_id} and its traffic history")
+
+
+async def create_client_for_user(
+    user_id: int,
+    public_key: str,
+    name: str,
+    ip: str,
+    private_key: str = "",
+    server_id: int = 1
+) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT name FROM servers WHERE id = ?', (server_id,))
+        row = await cursor.fetchone()
+        server_name = row[0] if row else 'local'
+
+        cursor = await db.execute('''
+            INSERT INTO clients (user_id, public_key, name, ip, private_key, server_id, server_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        ''', (user_id, public_key, name, ip, private_key, server_id, server_name))
+
+        row = await cursor.fetchone()
+        await db.commit()
+        client_id = row[0]
+        logger.info(f"Created client {name} ({public_key[:8]}...) for user {user_id}")
+        return client_id
+
+
+async def get_user_clients(user_id: int) -> List[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT id, public_key, name, ip, server_id, server_name, is_active, created_at
+            FROM clients WHERE user_id = ? ORDER BY created_at DESC
+        ''', (user_id,))
+        rows = await cursor.fetchall()
+        logger.debug(f"Found {len(rows)} clients for user {user_id}")
+        return [dict(row) for row in rows]
+
+
+async def get_client_by_id(client_id: int) -> Optional[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT c.*, u.traffic_limit_bytes, u.traffic_used_bytes, u.expiry_date
+            FROM clients c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.id = ?
+        ''', (client_id,))
+        row = await cursor.fetchone()
+        if row:
+            logger.debug(f"Found client by ID {client_id}")
+            return dict(row)
+        logger.debug(f"Client ID {client_id} not found")
+        return None
+
+
+async def get_client_by_public_key(public_key: str) -> Optional[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT c.*, u.traffic_limit_bytes, u.traffic_used_bytes, u.expiry_date
+            FROM clients c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.public_key = ?
+        ''', (public_key,))
+        row = await cursor.fetchone()
+        if row:
+            logger.debug(f"Found client by public key {public_key[:8]}...")
+            return dict(row)
+        logger.debug(f"Client {public_key[:8]}... not found")
+        return None
+
+
+async def soft_delete_client(client_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE clients SET is_active = 0, is_deleted = 1 WHERE id = ?', (client_id,))
+        await db.commit()
+        logger.info(f"Client {client_id} soft deleted")
+
+
+async def get_all_clients_with_user_info(include_deleted: bool = False) -> List[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = '''
+            SELECT
+                c.id as client_id,
+                c.public_key,
+                c.name,
+                c.ip,
+                c.server_id,
+                c.server_name,
+                c.is_active,
+                c.user_id,
+                c.created_at,
+                u.username,
+                u.traffic_limit_bytes,
+                u.traffic_used_bytes,
+                u.expiry_date
+            FROM clients c
+            LEFT JOIN users u ON c.user_id = u.id
+        '''
+        if not include_deleted:
+            query += ' WHERE c.is_deleted = 0'
+        query += ' ORDER BY c.created_at DESC'
+        cursor = await db.execute(query)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
 
 # ---------- Серверы ----------
 async def get_server(server_id: int) -> Optional[Dict]:
@@ -318,6 +561,7 @@ async def get_server(server_id: int) -> Optional[Dict]:
         logger.debug(f"Server {server_id} not found")
         return None
 
+
 async def get_all_servers() -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -328,9 +572,9 @@ async def get_all_servers() -> List[Dict]:
         rows = await cursor.fetchall()
         logger.debug(f"Fetched {len(rows)} servers")
         return [dict(row) for row in rows]
-    
+
+
 async def get_all_servers_full() -> List[Dict]:
-    """Возвращает все серверы с полной информацией, включая password и private_key (только для внутреннего использования)."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
@@ -340,6 +584,7 @@ async def get_all_servers_full() -> List[Dict]:
         rows = await cursor.fetchall()
         logger.debug(f"Fetched {len(rows)} servers (full)")
         return [dict(row) for row in rows]
+
 
 async def add_server(server_data: dict) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -361,6 +606,7 @@ async def add_server(server_data: dict) -> int:
         logger.info(f"Added new server: {server_data.get('name')} (ID {server_id})")
         return server_id
 
+
 async def update_server(server_id: int, server_data: dict):
     async with aiosqlite.connect(DB_PATH) as db:
         fields = []
@@ -374,11 +620,13 @@ async def update_server(server_id: int, server_data: dict):
             query = f"UPDATE servers SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             await db.execute(query, values)
             await db.commit()
-            logger.info(f"Updated server {server_id}")
+            logger.info(f"Updated server {server_id} with fields: {fields}")
+        else:
+            logger.warning(f"No fields to update for server {server_id}")
+
 
 async def delete_server(server_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        # Проверяем, есть ли клиенты
         cursor = await db.execute('SELECT COUNT(*) FROM clients WHERE server_id = ?', (server_id,))
         count = (await cursor.fetchone())[0]
         if count > 0:
@@ -388,78 +636,167 @@ async def delete_server(server_id: int):
         await db.commit()
         logger.info(f"Deleted server {server_id}")
 
+
 # ---------- Проверка лимитов ----------
-async def check_traffic_limits(server_instance=None) -> List[str]:
-    """Возвращает список публичных ключей клиентов, превысивших лимит."""
+async def check_traffic_limits(server_instance=None) -> List[int]:
+    deactivated_users = []
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('''
-            SELECT public_key FROM clients
+            SELECT id FROM users
             WHERE traffic_limit_bytes IS NOT NULL
               AND traffic_used_bytes > traffic_limit_bytes
-              AND is_active = 1
         ''')
         rows = await cursor.fetchall()
-        deactivated = []
-        for (pub_key,) in rows:
-            await db.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (pub_key,))
-            deactivated.append(pub_key)
-            logger.warning(f"Traffic limit exceeded for {pub_key[:8]}... deactivating")
+        for (user_id,) in rows:
+            deactivated_users.append(user_id)
+            await db.execute('UPDATE clients SET is_active = 0 WHERE user_id = ?', (user_id,))
+            logger.warning(f"Traffic limit exceeded for user {user_id}, deactivating all clients")
             if server_instance:
-                await server_instance.block_client(pub_key)
+                cursor2 = await db.execute('SELECT public_key FROM clients WHERE user_id = ?', (user_id,))
+                keys = await cursor2.fetchall()
+                for (pub_key,) in keys:
+                    await server_instance.block_client(pub_key)
         await db.commit()
-        return deactivated
+    return deactivated_users
 
-async def check_expiry_limits(server_instance=None) -> List[str]:
+
+async def check_expiry_limits(server_instance=None) -> List[int]:
+    deactivated_users = []
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('''
-            SELECT public_key FROM clients
+            SELECT id FROM users
             WHERE expiry_date IS NOT NULL
               AND datetime(expiry_date) <= datetime('now')
-              AND is_active = 1
         ''')
         rows = await cursor.fetchall()
-        deactivated = []
-        for (pub_key,) in rows:
-            await db.execute('UPDATE clients SET is_active = 0 WHERE public_key = ?', (pub_key,))
-            deactivated.append(pub_key)
-            logger.warning(f"Expiry date reached for {pub_key[:8]}... deactivating")
+        for (user_id,) in rows:
+            deactivated_users.append(user_id)
+            await db.execute('UPDATE clients SET is_active = 0 WHERE user_id = ?', (user_id,))
+            logger.warning(f"Expiry date reached for user {user_id}, deactivating all clients")
             if server_instance:
-                await server_instance.block_client(pub_key)
+                cursor2 = await db.execute('SELECT public_key FROM clients WHERE user_id = ?', (user_id,))
+                keys = await cursor2.fetchall()
+                for (pub_key,) in keys:
+                    await server_instance.block_client(pub_key)
         await db.commit()
-        return deactivated
+    return deactivated_users
+
 
 async def check_all_limits(server_instance=None) -> Dict:
     traffic = await check_traffic_limits(server_instance)
     expiry = await check_expiry_limits(server_instance)
     total = len(traffic) + len(expiry)
-    logger.info(f"Checked limits: {total} clients deactivated (traffic: {len(traffic)}, expiry: {len(expiry)})")
+    logger.info(f"Checked limits: {total} users deactivated (traffic: {len(traffic)}, expiry: {len(expiry)})")
     return {
         'traffic_deactivated': traffic,
         'expiry_deactivated': expiry,
         'total_deactivated': total
     }
 
-async def _force_init():
-    """Принудительная инициализация БД при импорте модуля"""
-    try:
-        # Проверяем существование таблиц
+
+async def get_traffic_today() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        today_utc = datetime.now(timezone.utc).date()
+        today_start = datetime.combine(today_utc, datetime.min.time(), tzinfo=timezone.utc)
+        today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+        cursor = await db.execute('''
+            SELECT SUM(total_bytes) FROM traffic_history
+            WHERE recorded_at >= ?
+        ''', (today_start_str,))
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else 0
+
+
+async def get_traffic_history(days: int = 30) -> List[Dict]:
+    history = []
+    now_utc = datetime.now(timezone.utc)
+    today_utc = now_utc.date()
+    async with aiosqlite.connect(DB_PATH) as db:
+        for i in range(days - 1, -1, -1):
+            day = today_utc - timedelta(days=i)
+            day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+            day_end = day_start + timedelta(days=1)
+            day_start_str = day_start.strftime('%Y-%m-%d %H:%M:%S')
+            day_end_str = day_end.strftime('%Y-%m-%d %H:%M:%S')
+            cursor = await db.execute('''
+                SELECT SUM(total_bytes) FROM traffic_history
+                WHERE recorded_at >= ? AND recorded_at < ?
+            ''', (day_start_str, day_end_str))
+            row = await cursor.fetchone()
+            bytes_total = row[0] if row and row[0] else 0
+            history.append({
+                "date": day.isoformat(),
+                "bytes": bytes_total
+            })
+    return history
+
+async def get_total_traffic_users() -> int:
+    """Возвращает суммарный трафик всех пользователей (traffic_used_bytes)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT COALESCE(SUM(traffic_used_bytes), 0) FROM users')
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+async def get_expiring_users(days: int = 7) -> List[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now = datetime.now()
+        future = now + timedelta(days=days)
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        future_str = future.strftime('%Y-%m-%d %H:%M:%S')
+        cursor = await db.execute('''
+            SELECT id, username, expiry_date FROM users
+            WHERE expiry_date IS NOT NULL
+            AND expiry_date BETWEEN ? AND ?
+            ORDER BY expiry_date ASC
+        ''', (now_str, future_str))
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def update_client_private_key(client_id: int, private_key: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE clients SET private_key = ? WHERE id = ?', (private_key, client_id))
+        await db.commit()
+        logger.debug(f"Updated private key for client {client_id}")
+
+
+async def update_user_limit(user_id: int, limit_bytes: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        if limit_bytes <= 0:
+            await db.execute('UPDATE users SET traffic_limit_bytes = NULL WHERE id = ?', (user_id,))
+        else:
+            await db.execute('UPDATE users SET traffic_limit_bytes = ? WHERE id = ?', (limit_bytes, user_id))
+        await db.commit()
+        logger.info(f"Updated traffic limit for user {user_id} to {limit_bytes}")
+
+
+async def update_user_expiry(user_id: int, expiry_date: Optional[str]):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE users SET expiry_date = ? WHERE id = ?', (expiry_date, user_id))
+        await db.commit()
+        logger.info(f"Updated expiry for user {user_id} to {expiry_date}")
+
+
+async def sync_user_clients_with_limits(user_id: int, server_instance=None):
+    ok, reason = await check_user_limits(user_id)
+    if not ok:
+        await deactivate_user_clients(user_id, server_instance)
+    else:
         async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='servers'"
-            )
-            if not await cursor.fetchone():
-                logger.info("Auto-initializing database on module import")
-                await init_db()
-            else:
-                logger.debug("Database already initialized")
-    except Exception as e:
-        logger.error(f"Auto-init failed: {e}, trying full init")
-        await init_db()
+            cursor = await db.execute('SELECT public_key FROM clients WHERE user_id = ? AND is_active = 0', (user_id,))
+            rows = await cursor.fetchall()
+            for (pub_key,) in rows:
+                await db.execute('UPDATE clients SET is_active = 1 WHERE public_key = ?', (pub_key,))
+                if server_instance:
+                    await server_instance.unblock_client(pub_key)
+            await db.commit()
+        logger.info(f"Activated all clients for user {user_id} (limits OK)")
 
 
-import asyncio
-try:
-    loop = asyncio.get_running_loop()
-    loop.create_task(_force_init())
-except RuntimeError:
-    asyncio.run(_force_init())
+async def get_server_clients(server_id: int) -> List[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('SELECT public_key, is_active FROM clients WHERE server_id = ?', (server_id,))
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
