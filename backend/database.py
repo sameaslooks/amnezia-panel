@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 import bcrypt
 from logger import logger
+from typing import TYPE_CHECKING, Dict, List, Optional, Any
+if TYPE_CHECKING:
+    from awg_manager import AmneziaWGServer
 
 DB_PATH = "/app/data/amnezia.db"
 
@@ -638,62 +641,6 @@ async def delete_server(server_id: int):
 
 
 # ---------- Проверка лимитов ----------
-async def check_traffic_limits(server_instance=None) -> List[int]:
-    deactivated_users = []
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id FROM users
-            WHERE traffic_limit_bytes IS NOT NULL
-              AND traffic_used_bytes > traffic_limit_bytes
-        ''')
-        rows = await cursor.fetchall()
-        for (user_id,) in rows:
-            deactivated_users.append(user_id)
-            await db.execute('UPDATE clients SET is_active = 0 WHERE user_id = ?', (user_id,))
-            logger.warning(f"Traffic limit exceeded for user {user_id}, deactivating all clients")
-            if server_instance:
-                cursor2 = await db.execute('SELECT public_key FROM clients WHERE user_id = ?', (user_id,))
-                keys = await cursor2.fetchall()
-                for (pub_key,) in keys:
-                    await server_instance.block_client(pub_key)
-        await db.commit()
-    return deactivated_users
-
-
-async def check_expiry_limits(server_instance=None) -> List[int]:
-    deactivated_users = []
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id FROM users
-            WHERE expiry_date IS NOT NULL
-              AND datetime(expiry_date) <= datetime('now')
-        ''')
-        rows = await cursor.fetchall()
-        for (user_id,) in rows:
-            deactivated_users.append(user_id)
-            await db.execute('UPDATE clients SET is_active = 0 WHERE user_id = ?', (user_id,))
-            logger.warning(f"Expiry date reached for user {user_id}, deactivating all clients")
-            if server_instance:
-                cursor2 = await db.execute('SELECT public_key FROM clients WHERE user_id = ?', (user_id,))
-                keys = await cursor2.fetchall()
-                for (pub_key,) in keys:
-                    await server_instance.block_client(pub_key)
-        await db.commit()
-    return deactivated_users
-
-
-async def check_all_limits(server_instance=None) -> Dict:
-    traffic = await check_traffic_limits(server_instance)
-    expiry = await check_expiry_limits(server_instance)
-    total = len(traffic) + len(expiry)
-    logger.info(f"Checked limits: {total} users deactivated (traffic: {len(traffic)}, expiry: {len(expiry)})")
-    return {
-        'traffic_deactivated': traffic,
-        'expiry_deactivated': expiry,
-        'total_deactivated': total
-    }
-
-
 async def get_traffic_today() -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         today_utc = datetime.now(timezone.utc).date()
@@ -800,3 +747,69 @@ async def get_server_clients(server_id: int) -> List[Dict]:
         cursor = await db.execute('SELECT public_key, is_active FROM clients WHERE server_id = ?', (server_id,))
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    
+
+async def get_users_exceeded_traffic() -> List[int]:
+    """Возвращает список ID пользователей, у которых превышен лимит трафика."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('''
+            SELECT id FROM users
+            WHERE traffic_limit_bytes IS NOT NULL
+              AND traffic_used_bytes > traffic_limit_bytes
+        ''')
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+
+async def get_users_expired() -> List[int]:
+    """Возвращает список ID пользователей, у которых истёк срок."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('''
+            SELECT id FROM users
+            WHERE expiry_date IS NOT NULL
+              AND datetime(expiry_date) <= datetime('now')
+        ''')
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+
+async def get_user_clients_grouped_by_server(user_id: int) -> Dict[int, List[Dict]]:
+    """Возвращает словарь {server_id: [client1, client2, ...]} для пользователя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT id, public_key, server_id, is_active
+            FROM clients
+            WHERE user_id = ? AND is_deleted = 0
+        ''', (user_id,))
+        rows = await cursor.fetchall()
+        result = {}
+        for row in rows:
+            d = dict(row)
+            server_id = d['server_id']
+            result.setdefault(server_id, []).append(d)
+        return result
+
+async def sync_user_limits_across_servers(user_id: int, server_instances: Dict[int, 'AmneziaWGServer']):
+    """
+    Проверяет лимиты пользователя и синхронизирует статусы всех его клиентов на всех серверах.
+    server_instances: словарь {server_id: экземпляр AmneziaWGServer} для активных серверов.
+    """
+    # Импортируем внутри, чтобы избежать циклического импорта
+    from awg_manager import AmneziaWGServer
+
+    ok, reason = await check_user_limits(user_id)
+    clients_by_server = await get_user_clients_grouped_by_server(user_id)
+    for server_id, clients in clients_by_server.items():
+        server = server_instances.get(server_id)
+        if not server:
+            logger.warning(f"Server {server_id} not available for user {user_id} sync")
+            continue
+        for client in clients:
+            if ok:
+                await server.unblock_client(client['public_key'])
+                await activate_client(client['public_key'])   # обновляем БД на is_active=1
+            else:
+                await server.block_client(client['public_key'])
+                await deactivate_client(client['id'])         # обновляем БД на is_active=0
+    logger.info(f"Synced user {user_id} across servers, limits ok: {ok}")

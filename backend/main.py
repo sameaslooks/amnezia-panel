@@ -26,6 +26,17 @@ from stats import get_dashboard_stats
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    # Синхронизация маршрутов при старте для всех активных серверов
+    servers = await db.get_all_servers_full()
+    for srv in servers:
+        if srv['is_active']:
+            try:
+                conn = await _create_server_connection(srv)
+                server = AmneziaWGServer(conn, server_id=srv['id'])
+                await server.sync_routes_with_db()
+                await conn.close()
+            except Exception as e:
+                logger.error(f"Failed to sync routes for server {srv['id']}: {e}")
     task = asyncio.create_task(collect_stats_periodically())
     yield
     task.cancel()
@@ -54,6 +65,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+async def get_server_instances_for_user(user_id: int) -> Dict[int, AmneziaWGServer]:
+    """Возвращает словарь {server_id: AmneziaWGServer} для всех серверов, где есть клиенты пользователя."""
+    clients = await db.get_user_clients(user_id)
+    server_ids = set(c['server_id'] for c in clients)
+    instances = {}
+    for sid in server_ids:
+        server_data = await db.get_server(sid)
+        if server_data and server_data['is_active']:
+            conn = await _create_server_connection(server_data)
+            instances[sid] = AmneziaWGServer(conn, server_id=sid)
+    return instances
 
 async def get_current_user(request: Request):
     auth_header = request.headers.get("Authorization")
@@ -221,12 +244,7 @@ async def get_limits(admin: dict = Depends(get_current_admin)):
 
 
 @app.post("/api/limits")
-async def set_limit(
-    public_key: str,
-    limit_bytes: int,
-    server_id: Optional[int] = None,
-    admin: dict = Depends(get_current_admin)
-):
+async def set_limit(public_key: str, limit_bytes: int, server_id: Optional[int] = None, admin: dict = Depends(get_current_admin)):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
     client = await db.get_client_by_public_key(decoded_key)
@@ -238,20 +256,26 @@ async def set_limit(
         if not client_info:
             raise HTTPException(status_code=404, detail="Client not found in server config")
         raise HTTPException(status_code=400, detail="Client exists in config but not in DB. Please fetch clients first.")
+    
     user_id = client['user_id']
     await db.update_user_limit(user_id, limit_bytes)
-    server_instance = await get_server(server_id=client['server_id'], current_user=admin)
-    await db.sync_user_clients_with_limits(user_id, server_instance)
+    
+    server_instances = {}
+    clients = await db.get_user_clients(user_id)
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    
+    await db.sync_user_limits_across_servers(user_id, server_instances)
+    
+    for srv in server_instances.values():
+        await srv.conn.close()
+    
     return {"message": "Limit set"}
 
 
 @app.post("/api/clients/expiry")
-async def set_client_expiry_endpoint(
-    public_key: str,
-    expiry: ExpiryDateRequest,
-    server_id: Optional[int] = None,
-    admin: dict = Depends(get_current_admin)
-):
+async def set_client_expiry_endpoint(public_key: str, expiry: ExpiryDateRequest, server_id: Optional[int] = None, admin: dict = Depends(get_current_admin)):
     from urllib.parse import unquote
     decoded_key = unquote(public_key)
     client = await db.get_client_by_public_key(decoded_key)
@@ -265,8 +289,17 @@ async def set_client_expiry_endpoint(
         raise HTTPException(status_code=400, detail="Client exists in config but not in DB. Please fetch clients first.")
     user_id = client['user_id']
     await db.update_user_expiry(user_id, expiry.expiry_date)
-    server_instance = await get_server(server_id=client['server_id'], current_user=admin)
-    await db.sync_user_clients_with_limits(user_id, server_instance)
+    server_instances = {}
+    clients = await db.get_user_clients(user_id)
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    
+    await db.sync_user_limits_across_servers(user_id, server_instances)
+    
+    for srv in server_instances.values():
+        await srv.conn.close()
+    
     return {"message": "Expiry date set"}
 
 
@@ -286,10 +319,10 @@ async def deactivate_client_endpoint(public_key: str, admin: dict = Depends(get_
     return {"message": "Client deactivated"}
 
 
-@app.post("/api/iptables/sync")
-async def sync_iptables(server: AmneziaWGServer = Depends(get_server)):
-    await server.sync_iptables_with_db()
-    return {"message": "iptables synchronized"}
+@app.post("/api/routes/sync")
+async def sync_routes(server: AmneziaWGServer = Depends(get_server)):
+    await server.sync_routes_with_db()
+    return {"message": "Routes synchronized"}
 
 
 @app.get("/api/generate-link")

@@ -101,9 +101,13 @@ class AmneziaWGServer:
 
     async def add_client(self, name: str, user_id: int) -> Dict:
         logger.info(f"Adding new client with name '{name}' for user {user_id} on server {self.server_id}")
+        
         if not await database.can_create_config(user_id):
             raise ValueError("Config limit reached for this user")
         
+        limits_ok, _ = await database.check_user_limits(user_id)
+        initial_active = limits_ok
+
         private_key = (await self.conn.run_command("awg genkey")).strip()
         public_key = (await self.conn.run_command(f"echo '{private_key}' | awg pubkey")).strip()
         if not public_key:
@@ -119,15 +123,16 @@ class AmneziaWGServer:
 PublicKey = {public_key}
 PresharedKey = {psk}
 AllowedIPs = {next_ip}
-    """
+        """
         new_config = config.rstrip() + "\n" + peer_section
-        normalized = awg_utils.normalize_config(new_config)  # нормализуем до записи
+        normalized = awg_utils.normalize_config(new_config)
 
         if not await self._write_config(normalized):
             raise Exception("Failed to write config file")
-        await self._syncconf()  # применяем изменения к работающему интерфейсу
+        
+        await self._syncconf()
 
-        await database.create_client_for_user(
+        client_id = await database.create_client_for_user(
             user_id=user_id,
             public_key=public_key,
             name=name,
@@ -136,34 +141,51 @@ AllowedIPs = {next_ip}
             server_id=self.server_id
         )
 
+        if initial_active:
+            ip = next_ip.split('/')[0]  # убираем /32
+            await self._add_route(ip)
+            logger.info(f"Added route for new client {public_key[:8]}... (IP {ip})")
+        else:
+            logger.info(f"Client {name} created but deactivated due to user limits")
+
         client_config = await self.get_client_config(public_key)
         if client_config:
             safe_name = public_key.replace('/', '_')
             await self.conn.run_command("mkdir -p /opt/amnezia/client_configs", in_container=True)
             await self.conn.write_file(f"/opt/amnezia/client_configs/{safe_name}.conf", client_config)
 
-        logger.info(f"Client {name} ({public_key[:8]}...) added with IP {next_ip}")
+        logger.info(f"Client {name} ({public_key[:8]}...) added with IP {next_ip}, active={initial_active}")
         return {
             "name": name,
             "ip": next_ip,
             "public_key": public_key,
-            "config": client_config
+            "config": client_config,
+            "active": initial_active
         }
 
     async def delete_client(self, public_key: str):
         logger.info(f"Deleting client {public_key[:8]}...")
+        
+        ip = await self._get_client_ip(public_key)
+        if ip:
+            logger.debug(f"Found IP {ip} for client {public_key[:8]}...")
+        else:
+            logger.warning(f"Could not find IP for client {public_key[:8]}...")
+        
         client = await database.get_client_by_public_key(public_key)
         if client:
             client_id = client['id']
             await database.soft_delete_client(client_id)
         else:
             logger.warning(f"Client {public_key[:8]} not found in DB, will remove only from config and clientsTable")
+        
         config = await self._read_config()
         peers = awg_utils.parse_peers(config)
         new_peers = [p for p in peers if p.get('public_key') != public_key]
         if len(new_peers) == len(peers):
             logger.warning(f"Client {public_key[:8]}... not found, nothing to delete")
             return
+        
         interface_part = config.split('[Peer]')[0]
         new_config = interface_part
         for peer in new_peers:
@@ -173,10 +195,17 @@ AllowedIPs = {next_ip}
             if 'ip' in peer:
                 peer_block += f"AllowedIPs = {peer['ip']}\n"
             new_config += peer_block
+        
         normalized = awg_utils.normalize_config(new_config)
         if not await self._write_config(normalized):
             raise Exception("Failed to write config")
+        
         await self._syncconf()
+        
+        if ip:
+            await self._del_route(ip)
+            logger.info(f"Removed route for deleted client {public_key[:8]}... (IP {ip})")
+        
         await self._remove_from_clients_table(public_key)
         await self.conn.run_command(f"rm -f /opt/amnezia/client_configs/{public_key}.conf")
         logger.info(f"Client {public_key[:8]}... deleted")
@@ -305,46 +334,33 @@ AllowedIPs = {next_ip}
                         f"Failed to collect traffic for {pub_key[:8]} on server {self.server_id}"
                     )
 
-    async def _remove_client_iptables_rules(self, public_key: str):
-        """Удаляет все правила FORWARD с комментарием block_<public_key[:8]>."""
-        comment = f"block_{public_key[:8]}"
-        output = await self.conn.run_command("iptables -L FORWARD -n --line-numbers 2>/dev/null || true")
-        lines = output.split('\n')
-        numbers = []
-        for line in lines:
-            if comment in line:
-                parts = line.strip().split()
-                if parts and parts[0].isdigit():
-                    numbers.append(int(parts[0]))
-        for num in sorted(numbers, reverse=True):
-            await self.conn.run_command(f"iptables -D FORWARD {num} 2>/dev/null || true")
-        logger.debug(f"Removed {len(numbers)} iptables rules for {public_key[:8]}")
-
     async def block_client(self, public_key: str) -> bool:
-        await self._remove_client_iptables_rules(public_key)
         ip = await self._get_client_ip(public_key)
         if not ip:
             logger.warning(f"Cannot block {public_key[:8]}... IP not found")
             return False
-        comment = f"block_{public_key[:8]}"
-        await self.conn.run_command(f"iptables -I FORWARD 1 -s {ip} -m comment --comment '{comment}' -j DROP")
-        await self.conn.run_command(f"iptables -I FORWARD 1 -d {ip} -m comment --comment '{comment}' -j DROP")
-        logger.info(f"Blocked client {public_key[:8]}... (IP {ip})")
+        await self._del_route(ip)
+        logger.info(f"Blocked client {public_key[:8]}... (IP {ip}) – route removed")
         return True
 
     async def unblock_client(self, public_key: str) -> bool:
-        await self._remove_client_iptables_rules(public_key)
-        logger.info(f"Unblocked client {public_key[:8]}...")
+        ip = await self._get_client_ip(public_key)
+        if not ip:
+            logger.warning(f"Cannot unblock {public_key[:8]}... IP not found")
+            return False
+        await self._add_route(ip)
+        logger.info(f"Unblocked client {public_key[:8]}... (IP {ip}) – route added")
         return True
-
-    async def sync_iptables_with_db(self):
+        
+    async def sync_routes_with_db(self):
+        """Синхронизирует маршруты с полем is_active клиентов в БД для текущего сервера."""
         clients = await database.get_server_clients(self.server_id)
         for client in clients:
             if client['is_active']:
                 await self.unblock_client(client['public_key'])
             else:
                 await self.block_client(client['public_key'])
-        logger.info(f"iptables synchronized for server {self.server_id}")
+        logger.info(f"Routes synchronized for server {self.server_id}")
 
     async def generate_amnezia_vpn_link(self, public_key: str) -> str:
         logger.debug(f"Generating Amnezia link for {public_key[:8]}...")
@@ -518,6 +534,8 @@ AllowedIPs = {next_ip}
     async def start_container(self) -> bool:
         try:
             await self.conn.run_command("docker start amnezia-awg2 2>/dev/null || true", in_container=False)
+            await asyncio.sleep(2)
+            await self.sync_routes_with_db()
             logger.info(f"Container started on server {self.server_id}")
             return True
         except Exception as e:
@@ -532,3 +550,13 @@ AllowedIPs = {next_ip}
         except Exception as e:
             logger.error(f"Failed to restart container: {e}")
             return False
+        
+    async def _add_route(self, ip: str):
+        """Добавляет маршрут до клиента через интерфейс awg0 (в контейнере)."""
+        cmd = f"ip route add {ip}/32 dev awg0"
+        await self.conn.run_command(cmd)
+
+    async def _del_route(self, ip: str):
+        """Удаляет маршрут до клиента (если существует)."""
+        cmd = f"ip route del {ip}/32 dev awg0 2>/dev/null || true"
+        await self.conn.run_command(cmd)
