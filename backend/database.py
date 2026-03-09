@@ -614,16 +614,28 @@ async def update_server(server_id: int, server_data: dict):
     async with aiosqlite.connect(DB_PATH) as db:
         fields = []
         values = []
+        old_name = None
+        
+        # Если обновляется имя, сохраняем старое для лога
+        if 'name' in server_data:
+            cursor = await db.execute('SELECT name FROM servers WHERE id = ?', (server_id,))
+            row = await cursor.fetchone()
+            old_name = row[0] if row else None
+            
         for key in ['name', 'host', 'port', 'username', 'auth_type', 'password', 'private_key', 'is_active']:
             if key in server_data:
                 fields.append(f"{key} = ?")
                 values.append(server_data[key])
+                
         if fields:
             values.append(server_id)
             query = f"UPDATE servers SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
             await db.execute(query, values)
             await db.commit()
             logger.info(f"Updated server {server_id} with fields: {fields}")
+            
+            if 'name' in server_data and server_data['name'] != old_name:
+                await update_server_name_for_clients(server_id, server_data['name'])
         else:
             logger.warning(f"No fields to update for server {server_id}")
 
@@ -813,3 +825,12 @@ async def sync_user_limits_across_servers(user_id: int, server_instances: Dict[i
                 await server.block_client(client['public_key'])
                 await deactivate_client(client['id'])         # обновляем БД на is_active=0
     logger.info(f"Synced user {user_id} across servers, limits ok: {ok}")
+
+async def update_server_name_for_clients(server_id: int, new_name: str):
+    """Обновляет название сервера для всех клиентов этого сервера."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            UPDATE clients SET server_name = ? WHERE server_id = ?
+        ''', (new_name, server_id))
+        await db.commit()
+        logger.info(f"Updated server_name to '{new_name}' for all clients of server {server_id}")
