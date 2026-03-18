@@ -2,6 +2,9 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Request, HTTPException, Depends
+from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi import Response
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, List, Dict
@@ -132,12 +135,22 @@ async def get_server_public(server_id: int = 1):
 
 
 @app.post("/api/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, response: Response):
     logger.info(f"Login attempt for user {request.username}")
     user = await authenticate_user(request.username, request.password)
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     token = create_access_token(data={"sub": user["username"], "role": user["role"]})
+
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        max_age=86400,
+        samesite="lax",
+        path="/"
+    )
+
     logger.info(f"User {request.username} logged in successfully")
     return {"access_token": token, "token_type": "bearer", "role": user["role"]}
 
@@ -228,6 +241,7 @@ async def get_limits(admin: dict = Depends(get_current_admin)):
     result = []
     for c in clients:
         result.append({
+            "id": c["client_id"],
             "public_key": c["public_key"],
             "user_id": c["user_id"],
             "username": c["username"],
@@ -273,6 +287,17 @@ async def set_limit(public_key: str, limit_bytes: int, server_id: Optional[int] 
     
     return {"message": "Limit set"}
 
+@app.post("/api/users/{user_id}/traffic-limit")
+async def set_user_traffic_limit(user_id: int, limit_bytes: int, admin: dict = Depends(get_current_admin)):
+    await db.update_user_limit(user_id, limit_bytes)
+    server_instances = {}
+    clients = await db.get_user_clients(user_id)
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    if server_instances:
+        await db.sync_user_limits_across_servers(user_id, server_instances)
+    return {"message": "Traffic limit updated"}
 
 @app.post("/api/clients/expiry")
 async def set_client_expiry_endpoint(public_key: str, expiry: ExpiryDateRequest, server_id: Optional[int] = None, admin: dict = Depends(get_current_admin)):
@@ -302,6 +327,20 @@ async def set_client_expiry_endpoint(public_key: str, expiry: ExpiryDateRequest,
     
     return {"message": "Expiry date set"}
 
+@app.post("/api/users/{user_id}/expiry")
+async def set_user_expiry(user_id: int, expiry: ExpiryDateRequest, admin: dict = Depends(get_current_admin)):
+    """
+    Устанавливает expiry_date для пользователя (админский эндпоинт).
+    """
+    await db.update_user_expiry(user_id, expiry.expiry_date)
+    server_instances = {}
+    clients = await db.get_user_clients(user_id)
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    if server_instances:
+        await db.sync_user_limits_across_servers(user_id, server_instances)
+    return {"message": "User expiry updated"}
 
 @app.post("/api/clients/{public_key}/activate")
 async def activate_client_endpoint(public_key: str, admin: dict = Depends(get_current_admin)):
@@ -669,6 +708,29 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
             await websocket.close()
         except:
             pass
+
+async def get_current_user_optional(request: Request):
+    """Пытается получить пользователя из заголовка Authorization или из cookie."""
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+    else:
+        token = request.cookies.get("access_token")
+    
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload:
+        return None
+    return payload
+
+@app.get("/api/users/{user_id}")
+async def get_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 
 @app.get("/")
