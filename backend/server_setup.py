@@ -39,6 +39,9 @@ async def setup_server_stream(
                 return
         else:
             yield {"type": "step", "name": "✅ Docker already installed", "success": True}
+            user = conn.username
+            await conn.run_command(f"sudo usermod -aG docker {user}", in_container=False)
+            yield {"type": "info", "message": f"User {user} added to docker group"}
 
         # Создание директории и Dockerfile
         await conn.run_command("sudo mkdir -p /opt/amnezia", in_container=False)
@@ -68,7 +71,8 @@ ENTRYPOINT ["dumb-init", "/opt/amnezia/start.sh"]
         # Сборка образа
         build_cmd = "sudo docker build -t amnezia-awg2 -f /opt/amnezia/Dockerfile /opt/amnezia 2>&1"
         build_output = await conn.run_command(build_cmd, in_container=False)
-        if "Successfully tagged" in build_output:
+        # Проверяем успешную сборку по наличию одной из строк
+        if "Successfully tagged" in build_output or "naming to docker.io" in build_output:
             yield {"type": "step", "name": "🔨 Docker image built", "success": True, "output": build_output}
         else:
             yield {"type": "error", "message": "❌ Docker build failed", "output": build_output}
@@ -79,8 +83,11 @@ ENTRYPOINT ["dumb-init", "/opt/amnezia/start.sh"]
         await conn.run_command("sudo docker rm amnezia-awg2 2>/dev/null || true", in_container=False)
         yield {"type": "step", "name": "🔄 Old container removed", "success": True}
 
+        awg_params = generate_awg_config()
+        port = awg_params['port']
+
         # Запуск нового контейнера
-        run_cmd = "sudo docker run -d --name amnezia-awg2 --cap-add=NET_ADMIN --cap-add=NET_RAW --device=/dev/net/tun --restart unless-stopped -p 32308:32308/udp amnezia-awg2"
+        run_cmd = f"sudo docker run -d --name amnezia-awg2 --cap-add=NET_ADMIN --cap-add=NET_RAW --device=/dev/net/tun --restart unless-stopped -p {port}:{port}/udp amnezia-awg2"
         run_output = await conn.run_command(run_cmd, in_container=False)
         if not run_output.strip():
             yield {"type": "error", "message": "❌ Failed to start container", "output": run_output}
@@ -99,7 +106,6 @@ echo "Keys generated"
         yield {"type": "step", "name": "🔑 Server keys generated", "success": True, "output": keys_out}
 
         # Создание базового конфига сервера (внутри контейнера)
-        awg_params = generate_awg_config()
         config_script = f"""docker exec amnezia-awg2 sh -c '
 PRIVATE_KEY=$(cat /opt/amnezia/awg/server_private.key)
 cat > /opt/amnezia/awg/awg0.conf << EOF
@@ -146,10 +152,22 @@ def generate_awg_config():
     config['s2'] = random.randint(20, 150)
     config['s3'] = random.randint(1, 50)
     config['s4'] = random.randint(5, 30)
-    config['h1'] = f"{random.randint(10**9, 2*10**9)}-{random.randint(10**9, 2*10**9)}"
-    config['h2'] = f"{random.randint(1_900_000_000, 2_100_000_000)}-{random.randint(2_000_000_000, 2_200_000_000)}"
-    config['h3'] = f"{random.randint(2_100_000_000, 2_200_000_000)}-{random.randint(2_130_000_000, 2_150_000_000)}"
-    config['h4'] = f"{random.randint(2_140_000_000, 2_200_000_000)}-{random.randint(2_140_000_000, 2_200_000_000)}"
+    h1_min = random.randint(10**9, 2*10**9)
+    h1_max = random.randint(10**9, 2*10**9)
+    config['h1'] = f"{min(h1_min, h1_max)}-{max(h1_min, h1_max)}"
+    
+    h2_min = random.randint(1_900_000_000, 2_100_000_000)
+    h2_max = random.randint(2_000_000_000, 2_200_000_000)
+    config['h2'] = f"{min(h2_min, h2_max)}-{max(h2_min, h2_max)}"
+    
+    h3_min = random.randint(2_100_000_000, 2_200_000_000)
+    h3_max = random.randint(2_130_000_000, 2_150_000_000)
+    config['h3'] = f"{min(h3_min, h3_max)}-{max(h3_min, h3_max)}"
+    
+    h4_min = random.randint(2_140_000_000, 2_200_000_000)
+    h4_max = random.randint(2_140_000_000, 2_200_000_000)
+    config['h4'] = f"{min(h4_min, h4_max)}-{max(h4_min, h4_max)}"
+    
     i1_hex = secrets.token_hex(256)
     config['i1'] = f"<b 0x{i1_hex}>"
     return config
