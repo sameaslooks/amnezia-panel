@@ -2,6 +2,9 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Request, HTTPException, Depends
+from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi import Response
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, List, Dict
@@ -66,17 +69,30 @@ app.add_middleware(
 )
 
 
-async def get_server_instances_for_user(user_id: int) -> Dict[int, AmneziaWGServer]:
-    """Возвращает словарь {server_id: AmneziaWGServer} для всех серверов, где есть клиенты пользователя."""
-    clients = await db.get_user_clients(user_id)
-    server_ids = set(c['server_id'] for c in clients)
-    instances = {}
-    for sid in server_ids:
-        server_data = await db.get_server(sid)
-        if server_data and server_data['is_active']:
-            conn = await _create_server_connection(server_data)
-            instances[sid] = AmneziaWGServer(conn, server_id=sid)
-    return instances
+# ==================== MIDDLEWARE ====================
+@app.middleware("http")
+async def close_ssh_connection(request: Request, call_next):
+    """Закрывает SSH-соединение после обработки запроса, если оно сохранено в request.state."""
+    response = await call_next(request)
+    if hasattr(request.state, "ssh_conn"):
+        await request.state.ssh_conn.close()
+    return response
+
+
+# ==================== HELPERS ====================
+async def _create_server_connection(server_data: dict):
+    if server_data['auth_type'] == 'local':
+        return LocalConnection()
+    else:
+        return SSHConnection(
+            host=server_data['host'],
+            port=server_data['port'],
+            username=server_data['username'],
+            password=server_data.get('password'),
+            private_key=server_data.get('private_key'),
+            sudo_password=server_data.get('password') if server_data['auth_type'] == 'password' else None
+        )
+
 
 async def get_current_user(request: Request):
     auth_header = request.headers.get("Authorization")
@@ -85,10 +101,14 @@ async def get_current_user(request: Request):
     token = auth_header.split(" ")[1]
     payload = decode_token(token)
     if not payload:
-        logger.warning(f"Invalid token from {request.client.host}")
         raise HTTPException(status_code=401, detail="Invalid token")
+    from database import get_user_by_username
+    user = await get_user_by_username(payload.get("sub"))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.get('is_disabled', False):
+        raise HTTPException(status_code=401, detail="User account is disabled")
     return payload
-
 
 async def get_current_admin(current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin":
@@ -96,30 +116,49 @@ async def get_current_admin(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Admin only")
     return current_user
 
-
-async def _create_server_connection(server_data: dict):
-    if server_data['auth_type'] == 'local':
-        conn = LocalConnection()
-        logger.debug(f"Using local connection for server {server_data['id']}")
+async def get_current_user_optional(request: Request):
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
     else:
-        conn = SSHConnection(
-            host=server_data['host'],
-            port=server_data['port'],
-            username=server_data['username'],
-            password=server_data.get('password'),
-            private_key=server_data.get('private_key'),
-            sudo_password=server_data.get('password') if server_data['auth_type'] == 'password' else None
-        )
-        logger.debug(f"Using SSH connection for server {server_data['id']} ({server_data['host']})")
-    return conn
+        token = request.cookies.get("access_token")
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload:
+        return None
+    from database import get_user_by_username
+    user = await get_user_by_username(payload.get("sub"))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.get('is_disabled', False):
+        raise HTTPException(status_code=401, detail="User account is disabled")
+    return payload
 
 
-async def get_server(server_id: int = 1, current_user: dict = Depends(get_current_user)):
+async def get_server(server_id: int = 1, current_user: dict = Depends(get_current_user), request: Request = None):
+    """Возвращает экземпляр AmneziaWGServer с сохранением соединения в request.state для последующего закрытия."""
     server_data = await db.get_server(server_id)
     if not server_data:
         raise HTTPException(status_code=404, detail="Server not found")
     conn = await _create_server_connection(server_data)
+    if request:
+        request.state.ssh_conn = conn
     return AmneziaWGServer(conn, server_id=server_id)
+
+
+async def with_server(server_id: int, func, *args, **kwargs):
+    """Выполняет функцию с подключением к серверу и закрывает соединение после использования."""
+    server_data = await db.get_server(server_id)
+    if not server_data:
+        raise HTTPException(status_code=404, detail=f"Server {server_id} not found")
+    conn = await _create_server_connection(server_data)
+    try:
+        server = AmneziaWGServer(conn, server_id=server_id)
+        return await func(server, *args, **kwargs)
+    finally:
+        await conn.close()
 
 
 async def get_server_public(server_id: int = 1):
@@ -131,13 +170,24 @@ async def get_server_public(server_id: int = 1):
     return AmneziaWGServer(conn, server_id=server_id)
 
 
+# ==================== AUTH ENDPOINTS ====================
 @app.post("/api/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, response: Response):
     logger.info(f"Login attempt for user {request.username}")
     user = await authenticate_user(request.username, request.password)
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     token = create_access_token(data={"sub": user["username"], "role": user["role"]})
+
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        max_age=86400,
+        samesite="lax",
+        path="/"
+    )
+
     logger.info(f"User {request.username} logged in successfully")
     return {"access_token": token, "token_type": "bearer", "role": user["role"]}
 
@@ -147,6 +197,7 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
     return {"username": current_user.get("sub"), "role": current_user.get("role")}
 
 
+# ==================== CLIENTS ENDPOINTS ====================
 @app.get("/api/clients")
 async def get_clients(
     server: AmneziaWGServer = Depends(get_server),
@@ -189,9 +240,8 @@ async def delete_client(
             server_id = client['server_id']
         else:
             raise HTTPException(status_code=404, detail="Client not found in database, specify server_id")
-    server = await get_server(server_id=server_id, current_user=admin)
-    await server.delete_client(decoded_key)
-    return {"message": "Client deleted successfully"}
+    # Используем with_server, так как получаем server_id динамически
+    return await with_server(server_id, lambda s: s.delete_client(decoded_key))
 
 
 @app.get("/api/traffic")
@@ -199,11 +249,7 @@ async def get_traffic(
     server_id: Optional[int] = None,
     admin: dict = Depends(get_current_admin)
 ):
-    if server_id is None:
-        server = await get_server(server_id=1, current_user=admin)
-    else:
-        server = await get_server(server_id=server_id, current_user=admin)
-    return await server.get_traffic()
+    return await with_server(server_id or 1, lambda s: s.get_traffic())
 
 
 @app.get("/api/user-config")
@@ -212,13 +258,9 @@ async def get_user_config(
     server_id: int = 1,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Получение конфигурации клиента по публичному ключу.
-    """
-    server = await get_server(server_id, current_user)
-    config = await server.get_client_config(public_key)
+    config = await with_server(server_id, lambda s: s.get_client_config(public_key))
     if not config:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Client config not found")
     return {"config": config}
 
 
@@ -228,6 +270,7 @@ async def get_limits(admin: dict = Depends(get_current_admin)):
     result = []
     for c in clients:
         result.append({
+            "id": c["client_id"],
             "public_key": c["public_key"],
             "user_id": c["user_id"],
             "username": c["username"],
@@ -251,27 +294,46 @@ async def set_limit(public_key: str, limit_bytes: int, server_id: Optional[int] 
     if not client:
         if server_id is None:
             raise HTTPException(status_code=404, detail="Client not found, specify server_id")
-        server = await get_server(server_id=server_id, current_user=admin)
-        client_info = await server.get_client_info(decoded_key)
-        if not client_info:
-            raise HTTPException(status_code=404, detail="Client not found in server config")
+        # Проверяем существование в конфиге
+        def check_server(server):
+            async def _check():
+                info = await server.get_client_info(decoded_key)
+                if not info:
+                    raise HTTPException(status_code=404, detail="Client not found in server config")
+                return True
+            return _check()
+        await with_server(server_id, lambda s: check_server(s))
         raise HTTPException(status_code=400, detail="Client exists in config but not in DB. Please fetch clients first.")
-    
     user_id = client['user_id']
     await db.update_user_limit(user_id, limit_bytes)
-    
+    # Синхронизация клиентов на всех серверах
     server_instances = {}
     clients = await db.get_user_clients(user_id)
     for c in clients:
         if c['server_id'] not in server_instances:
             server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
-    
-    await db.sync_user_limits_across_servers(user_id, server_instances)
-    
-    for srv in server_instances.values():
-        await srv.conn.close()
-    
+    try:
+        await db.sync_user_limits_across_servers(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
     return {"message": "Limit set"}
+
+
+@app.post("/api/users/{user_id}/traffic-limit")
+async def set_user_traffic_limit(user_id: int, limit_bytes: int, admin: dict = Depends(get_current_admin)):
+    await db.update_user_limit(user_id, limit_bytes)
+    server_instances = {}
+    clients = await db.get_user_clients(user_id)
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    try:
+        await db.sync_user_limits_across_servers(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
+    return {"message": "Traffic limit updated"}
 
 
 @app.post("/api/clients/expiry")
@@ -282,10 +344,15 @@ async def set_client_expiry_endpoint(public_key: str, expiry: ExpiryDateRequest,
     if not client:
         if server_id is None:
             raise HTTPException(status_code=404, detail="Client not found, specify server_id")
-        server = await get_server(server_id=server_id, current_user=admin)
-        client_info = await server.get_client_info(decoded_key)
-        if not client_info:
-            raise HTTPException(status_code=404, detail="Client not found in server config")
+        # Проверка существования в конфиге
+        def check_server(server):
+            async def _check():
+                info = await server.get_client_info(decoded_key)
+                if not info:
+                    raise HTTPException(status_code=404, detail="Client not found in server config")
+                return True
+            return _check()
+        await with_server(server_id, lambda s: check_server(s))
         raise HTTPException(status_code=400, detail="Client exists in config but not in DB. Please fetch clients first.")
     user_id = client['user_id']
     await db.update_user_expiry(user_id, expiry.expiry_date)
@@ -294,13 +361,28 @@ async def set_client_expiry_endpoint(public_key: str, expiry: ExpiryDateRequest,
     for c in clients:
         if c['server_id'] not in server_instances:
             server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
-    
-    await db.sync_user_limits_across_servers(user_id, server_instances)
-    
-    for srv in server_instances.values():
-        await srv.conn.close()
-    
+    try:
+        await db.sync_user_limits_across_servers(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
     return {"message": "Expiry date set"}
+
+
+@app.post("/api/users/{user_id}/expiry")
+async def set_user_expiry(user_id: int, expiry: ExpiryDateRequest, admin: dict = Depends(get_current_admin)):
+    await db.update_user_expiry(user_id, expiry.expiry_date)
+    server_instances = {}
+    clients = await db.get_user_clients(user_id)
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    try:
+        await db.sync_user_limits_across_servers(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
+    return {"message": "User expiry updated"}
 
 
 @app.post("/api/clients/{public_key}/activate")
@@ -331,6 +413,7 @@ async def generate_vpn_link(public_key: str, server: AmneziaWGServer = Depends(g
     return {"link": link}
 
 
+# ==================== USERS ENDPOINTS ====================
 @app.get("/api/users")
 async def get_users(admin: dict = Depends(get_current_admin)):
     return await db.get_all_users()
@@ -346,13 +429,48 @@ async def create_user_endpoint(user: UserCreate, admin: dict = Depends(get_curre
 @app.put("/api/users/{user_id}")
 async def update_user_endpoint(user_id: int, user: UserUpdate, admin: dict = Depends(get_current_admin)):
     await db.update_user(
-        user_id, 
-        user.username, 
-        user.password, 
+        user_id,
+        user.username,
+        user.password,
         user.role,
         user.config_limit
     )
     return {"message": "User updated"}
+
+
+@app.post("/api/users/{user_id}/disable")
+async def disable_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    from database import set_user_disabled, get_user_clients, deactivate_user_clients
+    await set_user_disabled(user_id, True)
+    clients = await get_user_clients(user_id)
+    server_instances = {}
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    try:
+        for server_id, server in server_instances.items():
+            await deactivate_user_clients(user_id, server)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
+    return {"message": "User disabled"}
+
+
+@app.post("/api/users/{user_id}/enable")
+async def enable_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    from database import set_user_disabled, get_user_clients, sync_user_limits_across_servers
+    await set_user_disabled(user_id, False)
+    clients = await get_user_clients(user_id)
+    server_instances = {}
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    try:
+        await sync_user_limits_across_servers(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
+    return {"message": "User enabled"}
 
 
 @app.delete("/api/users/{user_id}")
@@ -363,8 +481,13 @@ async def delete_user_endpoint(user_id: int, admin: dict = Depends(get_current_a
         server_id = client['server_id']
         if server_id not in server_instances:
             server_instances[server_id] = await get_server(server_id=server_id, current_user=admin)
-    await db.delete_user(user_id, server_instances)
+    try:
+        await db.delete_user(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
     return {"message": "User deleted"}
+
 
 @app.get("/api/user/profile")
 async def get_user_profile(current_user: dict = Depends(get_current_user)):
@@ -380,8 +503,10 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
         "traffic_used_bytes": user_data.get("traffic_used_bytes", 0),
         "expiry_date": user_data.get("expiry_date"),
         "config_limit": user_data.get("config_limit", 1),
-        "clients_count": len(clients)
+        "clients_count": len(clients),
+        "is_disabled": user_data.get("is_disabled", False),
     }
+
 
 @app.get("/api/user/clients")
 async def get_my_clients(
@@ -393,19 +518,18 @@ async def get_my_clients(
         raise HTTPException(status_code=404, detail="User not found")
     user_id = user_data["id"]
     if server_id:
-        server = await get_server_public(server_id=server_id)
-        clients = await server.get_clients(user_id=user_id)
+        return await with_server(server_id, lambda s: s.get_clients(user_id=user_id))
     else:
         servers = await db.get_all_servers()
         all_clients = []
         for srv in servers:
             if not srv['is_active']:
                 continue
-            server = await get_server_public(server_id=srv['id'])
-            clients = await server.get_clients(user_id=user_id)
+            async def collect(server):
+                return await server.get_clients(user_id=user_id)
+            clients = await with_server(srv['id'], collect)
             all_clients.extend(clients)
-        clients = all_clients
-    return clients
+        return all_clients
 
 
 @app.post("/api/user/clients")
@@ -420,8 +544,7 @@ async def create_my_client(
     user_id = user_data["id"]
     if not await db.can_create_config(user_id):
         raise HTTPException(status_code=400, detail="Config limit reached")
-    server = await get_server_public(server_id)
-    return await server.add_client(client.name, user_id)
+    return await with_server(server_id, lambda s: s.add_client(client.name, user_id))
 
 
 @app.delete("/api/user/clients/{client_id}")
@@ -435,18 +558,15 @@ async def delete_my_client(
     client = await db.get_client_by_id(client_id)
     if not client or client['user_id'] != user_data["id"]:
         raise HTTPException(status_code=404, detail="Client not found")
-    server = await get_server_public(client['server_id'])
-    await server.delete_client(client['public_key'])
-    return {"message": "Client deleted"}
+    return await with_server(client['server_id'], lambda s: s.delete_client(client['public_key']))
 
 
 @app.get("/api/user/servers")
 async def get_user_servers(current_user: dict = Depends(get_current_user)):
-    """Возвращает список серверов, доступных пользователю для создания клиентов."""
     servers = await db.get_all_servers()
     return [
-        {"id": s["id"], "name": s["name"]} 
-        for s in servers 
+        {"id": s["id"], "name": s["name"]}
+        for s in servers
         if s.get("is_active")
     ]
 
@@ -465,26 +585,21 @@ async def get_my_traffic(
 
 @app.get("/api/user/traffic-now")
 async def get_user_traffic_now(current_user: dict = Depends(get_current_user)):
-    """Возвращает текущие данные трафика для клиентов пользователя."""
     user_data = await db.get_user_by_username(current_user["sub"])
     if not user_data:
         raise HTTPException(status_code=404, detail="User not found")
     clients = await db.get_user_clients(user_data["id"])
-    servers = await db.get_all_servers()
     result = []
-    for server in servers:
-        if not server.get('is_active'):
-            continue
-        from main import get_server_public
-        server_instance = await get_server_public(server['id'])
-        traffic_data = await server_instance.get_traffic()
-        user_keys = [c['public_key'] for c in clients if c['server_id'] == server['id']]
-        for t in traffic_data:
-            if t['public_key'] in user_keys:
+    for client in clients:
+        traffic = await with_server(client['server_id'], lambda s, pk=client['public_key']: s.get_traffic())
+        # traffic - список словарей
+        for t in traffic:
+            if t['public_key'] == client['public_key']:
                 result.append(t)
     return result
 
 
+# ==================== ADMIN STATS ENDPOINTS ====================
 @app.get("/api/admin/stats")
 async def admin_stats(admin: dict = Depends(get_current_admin)):
     try:
@@ -508,6 +623,7 @@ async def admin_stats_post(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== SERVERS ENDPOINTS ====================
 @app.get("/api/servers")
 async def get_servers(admin: dict = Depends(get_current_admin)):
     return await db.get_all_servers()
@@ -552,6 +668,7 @@ async def test_server_connection(server_id: int, admin: dict = Depends(get_curre
             )
         awg = AmneziaWGServer(conn, server_id)
         await awg.conn.run_command("echo 'test'")
+        await conn.close()
         return {"status": "ok", "message": "Connection successful"}
     except Exception as e:
         logger.error(f"Server {server_id} connection test failed: {e}")
@@ -561,63 +678,33 @@ async def test_server_connection(server_id: int, admin: dict = Depends(get_curre
 @app.get("/api/servers/{server_id}/status")
 async def get_server_status(
     server_id: int,
-    server: AmneziaWGServer = Depends(get_server),
     admin: dict = Depends(get_current_admin)
 ):
-    try:
-        status = await server.get_full_status()
-        return status
-    except Exception as e:
-        logger.error(f"Failed to get status for server {server_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await with_server(server_id, lambda s: s.get_full_status())
 
 
 @app.post("/api/servers/{server_id}/stop")
 async def stop_server_container(
     server_id: int,
-    server: AmneziaWGServer = Depends(get_server),
     admin: dict = Depends(get_current_admin)
 ):
-    try:
-        success = await server.stop_container()
-        if success:
-            return {"message": "Container stopped"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to stop container")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await with_server(server_id, lambda s: s.stop_container())
 
 
 @app.post("/api/servers/{server_id}/start")
 async def start_server_container(
     server_id: int,
-    server: AmneziaWGServer = Depends(get_server),
     admin: dict = Depends(get_current_admin)
 ):
-    try:
-        success = await server.start_container()
-        if success:
-            return {"message": "Container started"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to start container")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await with_server(server_id, lambda s: s.start_container())
 
 
 @app.post("/api/servers/{server_id}/restart")
 async def restart_server_container(
     server_id: int,
-    server: AmneziaWGServer = Depends(get_server),
     admin: dict = Depends(get_current_admin)
 ):
-    try:
-        success = await server.restart_container()
-        if success:
-            return {"message": "Container restarted"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to restart container")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await with_server(server_id, lambda s: s.restart_container())
 
 
 @app.websocket("/api/servers/{server_id}/setup-ws")
@@ -670,6 +757,29 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
         except:
             pass
 
+async def get_current_user_optional(request: Request):
+    """Пытается получить пользователя из заголовка Authorization или из cookie."""
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+    else:
+        token = request.cookies.get("access_token")
+    
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload:
+        return None
+    return payload
+
+@app.get("/api/users/{user_id}")
+async def get_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
 
 @app.get("/")
 async def root():
@@ -696,6 +806,15 @@ async def users_page():
     return FileResponse("/frontend/users.html")
 
 
+@app.get("/api/users/{user_id}")
+async def get_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+# ==================== EXCEPTION HANDLERS ====================
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     logger.warning(f"HTTP {exc.status_code} on {request.url.path}: {exc.detail}")
@@ -704,5 +823,6 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
+
     logger.error(f"Internal error on {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "Internal server error, please try again later."})

@@ -437,16 +437,21 @@
                                 class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-1">
                             + Add client
                         </button>
+                        <label class="flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" x-model="showDisabledUsers" class="rounded border-gray-300">
+                            <span>Show disabled accounts</span>
+                        </label>
                     </div>
                 </div>
 
                 <div class="space-y-6">
                     <template x-for="group in groupedClients" :key="group.user_id">
-                        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="bg-white rounded-lg shadow-md overflow-hidden" :class="{'bg-red-50': group.is_disabled}">
                             <div class="bg-gray-50 px-6 py-4 border-b flex flex-wrap items-center justify-between gap-4">
                                 <div>
                                     <span class="font-bold text-lg" x-text="group.username || 'Unknown user'"></span>
                                     <span class="ml-2 text-sm text-gray-600" x-text="'Role: ' + (group.role || 'user')"></span>
+                                    <span x-show="group.is_disabled" class="ml-2 text-xs text-red-600 font-semibold">(Account disabled)</span>
                                 </div>
                                 <div class="flex gap-4 text-sm items-center">
                                     <span><span class="font-medium">Limit:</span> <span x-text="group.limit ? formatBytes(group.limit) : 'No limit'"></span></span>
@@ -526,6 +531,7 @@
                                     <th class="px-4 py-2 text-left">Used</th>
                                     <th class="px-4 py-2 text-left">Expiry</th>
                                     <th class="px-r py-2 text-left">Config Limit</th>
+                                    <th class="px-4 py-2 text-left">Status</th>
                                     <th class="px-4 py-2 text-left">Created</th>
                                     <th class="px-4 py-2 text-left">Actions</th>
                                 </tr>
@@ -550,10 +556,20 @@
                                                 <span x-text="user.config_limit || '1'"></span>
                                             </template>
                                         </td>
+                                        <td class="px-4 py-2">
+                                            <span x-show="!user.is_disabled" class="text-green-600">● Active</span>
+                                            <span x-show="user.is_disabled" class="text-red-600">● Disabled</span>
+                                        </td>
+
                                         <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(user.created_at).toLocaleDateString()"></td>
                                         <td class="px-4 py-2">
                                             <button @click="editUserLimitsFromUser(user)" class="text-blue-500 hover:text-blue-700 mr-2" title="Edit limits">✎</button>
                                             <button @click="editUser(user)" class="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 mr-2">Edit</button>
+                                            <button @click="toggleUserStatus(user)"
+                                                    class="text-white px-3 py-1 rounded text-sm"
+                                                    :class="user.is_disabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
+                                                <span x-text="user.is_disabled ? 'Enable' : 'Disable'"></span>
+                                            </button>
                                             <button @click="deleteUserConfirm(user)" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600" :disabled="user.username === currentUser">Delete</button>
                                         </td>
                                     </tr>
@@ -885,6 +901,7 @@
             showAddServerModal: false,
             showAddUserModal: false,
             showUserLimitsModal: false,
+            showDisabledUsers: true,
             editingUserLimits: { user_id: null, value: 0, unit: 'GB', expiry_date: '' },
             syncing: false,
             qrSize: 400,
@@ -1171,6 +1188,27 @@
                     this.savingUser = false; 
                 }
             },
+            
+            async toggleUserStatus(user) {
+                const action = user.is_disabled ? 'enable' : 'disable';
+                if (!confirm(`Are you sure you want to ${action} user "${user.username}"?`)) return;
+                try {
+                    const response = await fetch(`/api/users/${user.id}/${action}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        this.success = `User ${action}d successfully`;
+                        setTimeout(() => this.success = '', 3000);
+                        this.fetchUsers();
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || `Failed to ${action} user`;
+                    }
+                } catch (err) {
+                    this.error = `Failed to ${action} user`;
+                }
+            },
 
             deleteUserConfirm(user) {
                 if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) return;
@@ -1435,23 +1473,18 @@
             },
 
             async saveUserLimits() {
-                const userClients = this.clients.filter(c => c.user_id === this.editingUserLimits.user_id);
-                if (!userClients.length) {
-                    this.error = 'No clients found for this user. Limits cannot be applied without at least one client.';
-                    return;
-                }
-                const publicKey = userClients[0].public_key;
+                const user_id = this.editingUserLimits.user_id;
                 const multiplier = { 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024, 'TB': 1024 * 1024 * 1024 * 1024 };
                 let limitBytes = this.editingUserLimits.value * multiplier[this.editingUserLimits.unit];
                 limitBytes = Math.round(limitBytes);
 
                 try {
-                    const response = await fetch(`/api/limits?public_key=${encodeURIComponent(publicKey)}&limit_bytes=${limitBytes}`, {
+                    const limitResponse = await fetch(`/api/users/${user_id}/traffic-limit?limit_bytes=${limitBytes}`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
-                    if (!response.ok) {
-                        const err = await response.json();
+                    if (!limitResponse.ok) {
+                        const err = await limitResponse.json();
                         this.error = err.detail || 'Failed to update limit';
                         return;
                     }
@@ -1461,7 +1494,7 @@
                         expiryToSend = this.formatServerDate(this.editingUserLimits.expiry_date);
                     }
 
-                    const expiryResponse = await fetch(`/api/clients/expiry?public_key=${encodeURIComponent(publicKey)}`, {
+                    const expiryResponse = await fetch(`/api/users/${user_id}/expiry`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({ expiry_date: expiryToSend })
@@ -1496,7 +1529,7 @@
                 this.clients.forEach(client => {
                     const uid = client.user_id;
                     if (!groups[uid]) {
-                        const user = this.users.find(u => u.id === uid) || { username: 'Unknown', role: 'user' };
+                        const user = this.users.find(u => u.id === uid) || { username: 'Unknown', role: 'user', is_disabled: false };
                         groups[uid] = {
                             user_id: uid,
                             username: user.username,
@@ -1505,12 +1538,17 @@
                             used: client.used,
                             expiry_date: client.expiry_date,
                             config_limit: user.config_limit,
+                            is_disabled: user.is_disabled || false,
                             clients: []
                         };
                     }
                     groups[uid].clients.push(client);
                 });
-                return Object.values(groups);
+                let result = Object.values(groups);
+                if (!this.showDisabledUsers) {
+                    result = result.filter(group => !group.is_disabled);
+                }
+                return result;
             },
 
             openEditServerModal(server) {
