@@ -85,6 +85,12 @@ async def init_db():
         await db.commit()
         logger.debug("Database tables created/verified")
 
+        # Добавляем колонку статуса отключённости пользователя
+        cursor = await db.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if 'is_disabled' not in columns:
+            await db.execute("ALTER TABLE users ADD COLUMN is_disabled BOOLEAN DEFAULT 0")
+
         # Добавляем сервер по умолчанию (локальный), если нет
         cursor = await db.execute("SELECT COUNT(*) FROM servers")
         count = (await cursor.fetchone())[0]
@@ -114,7 +120,7 @@ async def get_user_by_username(username: str) -> Optional[Dict]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
             SELECT id, username, password_hash, role, traffic_limit_bytes,
-                   traffic_used_bytes, expiry_date, config_limit, created_at
+                   traffic_used_bytes, expiry_date, config_limit, created_at, is_disabled
             FROM users WHERE username = ?
         ''', (username,))
         row = await cursor.fetchone()
@@ -142,7 +148,7 @@ async def get_all_users() -> List[Dict]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
             SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes, 
-                   expiry_date, config_limit, created_at
+                expiry_date, config_limit, created_at, is_disabled
             FROM users ORDER BY created_at DESC
         ''')
         rows = await cursor.fetchall()
@@ -164,6 +170,11 @@ async def update_user(user_id: int, username: str = None, password: str = None,
             await db.execute('UPDATE users SET config_limit = ? WHERE id = ?', (config_limit, user_id))
         await db.commit()
         logger.info(f"Updated user {user_id}")
+
+async def set_user_disabled(user_id: int, disabled: bool):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE users SET is_disabled = ? WHERE id = ?', (disabled, user_id))
+        await db.commit()
 
 async def delete_user(user_id: int, server_instances: dict = None):
     """
@@ -195,7 +206,7 @@ async def get_user_by_id(user_id: int) -> Optional[Dict]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
             SELECT id, username, role, traffic_limit_bytes, traffic_used_bytes,
-                   expiry_date, config_limit, created_at
+                expiry_date, config_limit, created_at, is_disabled
             FROM users WHERE id = ?
         ''', (user_id,))
         row = await cursor.fetchone()

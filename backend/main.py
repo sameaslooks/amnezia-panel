@@ -101,8 +101,13 @@ async def get_current_user(request: Request):
     token = auth_header.split(" ")[1]
     payload = decode_token(token)
     if not payload:
-        logger.warning(f"Invalid token from {request.client.host}")
         raise HTTPException(status_code=401, detail="Invalid token")
+    from database import get_user_by_username
+    user = await get_user_by_username(payload.get("sub"))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.get('is_disabled', False):
+        raise HTTPException(status_code=401, detail="User account is disabled")
     return payload
 
 async def get_current_admin(current_user: dict = Depends(get_current_user)):
@@ -123,6 +128,12 @@ async def get_current_user_optional(request: Request):
     payload = decode_token(token)
     if not payload:
         return None
+    from database import get_user_by_username
+    user = await get_user_by_username(payload.get("sub"))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.get('is_disabled', False):
+        raise HTTPException(status_code=401, detail="User account is disabled")
     return payload
 
 
@@ -427,6 +438,41 @@ async def update_user_endpoint(user_id: int, user: UserUpdate, admin: dict = Dep
     return {"message": "User updated"}
 
 
+@app.post("/api/users/{user_id}/disable")
+async def disable_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    from database import set_user_disabled, get_user_clients, deactivate_user_clients
+    await set_user_disabled(user_id, True)
+    clients = await get_user_clients(user_id)
+    server_instances = {}
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    try:
+        for server_id, server in server_instances.items():
+            await deactivate_user_clients(user_id, server)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
+    return {"message": "User disabled"}
+
+
+@app.post("/api/users/{user_id}/enable")
+async def enable_user(user_id: int, admin: dict = Depends(get_current_admin)):
+    from database import set_user_disabled, get_user_clients, sync_user_limits_across_servers
+    await set_user_disabled(user_id, False)
+    clients = await get_user_clients(user_id)
+    server_instances = {}
+    for c in clients:
+        if c['server_id'] not in server_instances:
+            server_instances[c['server_id']] = await get_server(server_id=c['server_id'], current_user=admin)
+    try:
+        await sync_user_limits_across_servers(user_id, server_instances)
+    finally:
+        for srv in server_instances.values():
+            await srv.conn.close()
+    return {"message": "User enabled"}
+
+
 @app.delete("/api/users/{user_id}")
 async def delete_user_endpoint(user_id: int, admin: dict = Depends(get_current_admin)):
     clients = await db.get_user_clients(user_id)
@@ -457,7 +503,8 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
         "traffic_used_bytes": user_data.get("traffic_used_bytes", 0),
         "expiry_date": user_data.get("expiry_date"),
         "config_limit": user_data.get("config_limit", 1),
-        "clients_count": len(clients)
+        "clients_count": len(clients),
+        "is_disabled": user_data.get("is_disabled", False),
     }
 
 
