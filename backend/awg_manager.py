@@ -63,7 +63,10 @@ class AmneziaWGServer:
             client_info = await database.get_client_by_public_key(pub_key)
             if user_id is not None and (not client_info or client_info['user_id'] != user_id):
                 continue
-            name = names.get(pub_key, f"Client {i}")
+            if client_info and client_info.get('name'):
+                name = client_info['name']
+            else:
+                name = names.get(pub_key, f"Client {i}")
             ip = peer.get('ip', '')
             client_data = {
                 'id': client_info['id'] if client_info else None,
