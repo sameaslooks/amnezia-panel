@@ -131,7 +131,22 @@
 
                 <!-- Графики мониторинга -->
                 <div class="bg-white rounded-lg shadow-md p-4 mb-6">
-                    <h3 class="text-lg font-bold mb-4">📈 System Monitoring</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold">📈 System Monitoring</h3>
+                        <div class="inline-flex rounded-md shadow-sm" role="group">
+                            <template x-for="range in timeRanges" :key="range.value">
+                                <button type="button"
+                                        @click="changeTimeRange(range.value)"
+                                        :class="{
+                                            'bg-blue-600 text-white': selectedTimeRange === range.value,
+                                            'bg-gray-200 text-gray-700 hover:bg-gray-300': selectedTimeRange !== range.value
+                                        }"
+                                        class="px-3 py-1 text-sm font-medium border border-gray-300 first:rounded-l-md last:rounded-r-md focus:z-10 focus:outline-none">
+                                    <span x-text="range.label"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="w-full">
                             <h4 class="text-sm font-medium text-gray-600 mb-2">CPU Usage</h4>
@@ -161,10 +176,10 @@
                 </div>
 
                 <!-- Нижние блоки -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-4">Top 10 Users by Traffic</h3>
-                        <div class="overflow-y-auto max-h-48">
+                        <div class="overflow-y-auto">
                             <table class="w-full text-sm">
                                 <thead>
                                     <tr class="text-left text-gray-500">
@@ -944,6 +959,14 @@
             qrSize: 400,
             chart: null,
             charts: {},
+            selectedTimeRange: '1h',
+            timeRanges: [
+                { label: '1 hour', value: '1h', seconds: 3600, step: '1m' },
+                { label: '4 hours', value: '4h', seconds: 14400, step: '5m' },
+                { label: '12 hours', value: '12h', seconds: 43200, step: '10m' },
+                { label: '1 hour', value: '1d', seconds: 86400, step: '30m' },
+                { label: '1 week', value: '1w', seconds: 604800, step: '2h' }
+            ],
             dashboardStats: {
                 servers: { total: 0, online: 0, issues: 0 },
                 clients: { total: 0, active: 0, blocked: 0 },
@@ -1839,18 +1862,18 @@
             },
 
             async loadMetrics() {
-                if (document.hidden) {
-                    // console.log('Tab hidden, skipping metrics load');
-                    return;
-                }
+                if (document.hidden) return;
                 try {
                     const token = this.getToken();
                     const now = Math.floor(Date.now() / 1000);
-                    const oneHourAgo = now - 3600;
+                    const range = this.timeRanges.find(r => r.value === this.selectedTimeRange);
+                    if (!range) return;
+                    const start = now - range.seconds;
+                    const step = range.step;
 
-                    // 1. CPU usage
+                    // 1. CPU
                     const cpuQuery = `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`;
-                    const cpuRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(cpuQuery)}&start=${oneHourAgo}&end=${now}&step=1m`, {
+                    const cpuRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(cpuQuery)}&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
                     if (cpuRes.ok) {
@@ -1858,18 +1881,18 @@
                         this.renderChart('cpuChart', data, 'CPU %');
                     }
 
-                    // 2. Memory usage
+                    // 2. Memory (аналогично)
                     const memQuery = `(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100`;
-                    const memRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(memQuery)}&start=${oneHourAgo}&end=${now}&step=1m`, {
+                    const memRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(memQuery)}&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
                     if (memRes.ok) {
                         const data = await memRes.json();
                         this.renderChart('memoryChart', data, 'Memory %');
                     } else {
-                        // Если нет MemAvailable_bytes, пробуем альтернативный запрос
+                        // альтернативный запрос
                         const altMemQuery = `(1 - ((node_memory_MemFree_bytes + node_memory_Cached_bytes + node_memory_Buffers_bytes) / node_memory_MemTotal_bytes)) * 100`;
-                        const altRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(altMemQuery)}&start=${oneHourAgo}&end=${now}&step=1m`, {
+                        const altRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(altMemQuery)}&start=${start}&end=${now}&step=${step}`, {
                             headers: { 'Authorization': `Bearer ${token}` }
                         });
                         if (altRes.ok) {
@@ -1878,8 +1901,8 @@
                         }
                     }
 
-                    // Speedtest results
-                    const speedtestRes = await fetch(`/api/metrics/query_range?query=download_speed_bps / 1000000&start=${oneHourAgo}&end=${now}&step=5m`, {
+                    // 3. Speedtest Download
+                    const speedtestRes = await fetch(`/api/metrics/query_range?query=download_speed_bps / 1000000&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
                     if (speedtestRes.ok) {
@@ -1887,27 +1910,13 @@
                         this.renderChart('speedtestDownloadChart', data, 'Download (Mbps)');
                     }
 
-                    const speedtestUploadRes = await fetch(`/api/metrics/query_range?query=upload_speed_bps / 1000000&start=${oneHourAgo}&end=${now}&step=5m`, {
+                    // 4. Speedtest Upload
+                    const speedtestUploadRes = await fetch(`/api/metrics/query_range?query=upload_speed_bps / 1000000&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
                     if (speedtestUploadRes.ok) {
                         const data = await speedtestUploadRes.json();
                         this.renderChart('speedtestUploadChart', data, 'Upload (Mbps)');
-                    }
-
-                    // 4. Active VPN clients – пока нет готовой метрики, можно заглушить
-                    // Для этого нужно добавить endpoint /metrics в панель и собирать количество клиентов.
-                    // Пока оставим сообщение "coming soon".
-                    const clientsCanvas = document.getElementById('clientsChart');
-                    if (clientsCanvas) {
-                        const ctx = clientsCanvas.getContext('2d');
-                        if (ctx) {
-                            ctx.clearRect(0, 0, clientsCanvas.width, clientsCanvas.height);
-                            ctx.font = '14px Arial';
-                            ctx.fillStyle = '#666';
-                            ctx.textAlign = 'center';
-                            ctx.fillText('Coming soon', clientsCanvas.width/2, clientsCanvas.height/2);
-                        }
                     }
 
                 } catch (err) {
@@ -2011,6 +2020,11 @@
                         }
                     }
                 });
+            },
+            
+            changeTimeRange(rangeValue) {
+                this.selectedTimeRange = rangeValue;
+                this.loadMetrics();
             },
 
             formatLocalDate(serverDateStr) {
