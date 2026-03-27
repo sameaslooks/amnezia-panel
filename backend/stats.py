@@ -6,7 +6,7 @@ from logger import logger
 
 
 async def get_dashboard_stats(server_statuses: List[Dict] = None) -> Dict[str, Any]:
-    from main import get_server_public
+    from main import with_server
 
     users = await db.get_all_users()
     clients = await db.get_all_clients_with_user_info()
@@ -17,8 +17,7 @@ async def get_dashboard_stats(server_statuses: List[Dict] = None) -> Dict[str, A
         if not server.get('is_active'):
             continue
         try:
-            server_instance = await get_server_public(server['id'])
-            server_traffic = await server_instance.get_traffic()
+            server_traffic = await with_server(server['id'], lambda s: s.get_traffic())
             traffic_data.extend(server_traffic)
         except Exception as e:
             logger.error(f"Failed to get traffic from server {server['id']}: {e}")
@@ -92,6 +91,8 @@ async def _get_servers_stats(servers: List[Dict], server_statuses: List = None) 
 
 
 async def _get_server_issues(servers: List[Dict], server_statuses: List = None) -> List[Dict]:
+    from main import with_server
+
     issues = []
     status_map = {}
     if server_statuses:
@@ -103,14 +104,6 @@ async def _get_server_issues(servers: List[Dict], server_statuses: List = None) 
 
     for server in servers:
         server_id = server['id']
-        status_info = status_map.get(server_id, {})
-        if isinstance(status_info, dict):
-            status = status_info.get('status', {})
-        else:
-            status = status_info.status if hasattr(status_info, 'status') else {}
-        if not isinstance(status, dict):
-            status = status.dict() if hasattr(status, 'dict') else {}
-
         if not server.get('is_active'):
             issues.append({
                 "server_id": server_id,
@@ -120,6 +113,19 @@ async def _get_server_issues(servers: List[Dict], server_statuses: List = None) 
             continue
         if server['auth_type'] == 'local':
             continue
+
+        status_info = status_map.get(server_id)
+        if status_info:
+            if isinstance(status_info, dict):
+                status = status_info.get('status', {})
+            else:
+                status = status_info.status if hasattr(status_info, 'status') else {}
+        else:
+            try:
+                status = await with_server(server_id, lambda s: s.get_full_status())
+            except Exception:
+                continue
+
         if not status.get('online'):
             issues.append({
                 "server_id": server_id,
