@@ -966,6 +966,7 @@
                     const token = this.getToken();
                     let allTraffic = [];
                     for (const server of this.servers) {
+                        if (!server.is_active) continue;
                         const url = server.id === 1 ? '/api/traffic' : `/api/traffic?server_id=${server.id}`;
                         const trafficRes = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
                         if (trafficRes.ok) {

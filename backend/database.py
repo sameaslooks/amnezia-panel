@@ -653,14 +653,16 @@ async def update_server(server_id: int, server_data: dict):
 
 async def delete_server(server_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT COUNT(*) FROM clients WHERE server_id = ?', (server_id,))
+        cursor = await db.execute(
+            'SELECT COUNT(*) FROM clients WHERE server_id = ? AND is_deleted = 0',
+            (server_id,)
+        )
         count = (await cursor.fetchone())[0]
         if count > 0:
-            logger.warning(f"Attempt to delete server {server_id} with {count} clients")
+            logger.warning(f"Attempt to delete server {server_id} with {count} active clients")
             raise Exception(f"Cannot delete server with {count} active clients")
         await db.execute('DELETE FROM servers WHERE id = ?', (server_id,))
         await db.commit()
-        logger.info(f"Deleted server {server_id}")
 
 
 # ---------- Проверка лимитов ----------
