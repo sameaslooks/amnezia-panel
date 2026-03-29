@@ -98,7 +98,7 @@ async def init_db():
             await db.execute('''
                 INSERT INTO servers (name, host, username, auth_type, is_active)
                 VALUES (?, ?, ?, ?, ?)
-            ''', ('local', 'localhost', 'local', 'local', 1))
+            ''', ('local', 'localhost', 'local', 'local', 0))
             await db.commit()
             logger.info("Added default local server")
 
