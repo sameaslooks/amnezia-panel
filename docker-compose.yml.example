@@ -40,8 +40,8 @@ services:
       - panel-network
     depends_on:
       - amnezia-panel
-      command: >
-        /bin/sh -c "envsubst '$$DOMAIN $$SERVER_NAME' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+    command: >
+      /bin/sh -c "envsubst '$$DOMAIN $$SERVER_NAME' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
 # -------------------------------------------------------
 
 # ----- Telegram bot can be enabled when required commenting out this block -----
