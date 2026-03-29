@@ -11,6 +11,7 @@ from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 import os
 import asyncio
+import httpx
 
 from auth import authenticate_user, create_access_token, decode_token
 import database as db
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
 setup_logger()
 
 app = FastAPI(title="Amnezia Panel", lifespan=lifespan)
+PROMETHEUS_URL = "http://prometheus:9090"
 
 static_dir = "/frontend/static"
 if os.path.exists(static_dir):
@@ -757,30 +759,45 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
         except:
             pass
 
-async def get_current_user_optional(request: Request):
-    """Пытается получить пользователя из заголовка Authorization или из cookie."""
-    token = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-    else:
-        token = request.cookies.get("access_token")
-    
-    if not token:
-        return None
-    payload = decode_token(token)
-    if not payload:
-        return None
-    return payload
 
-@app.get("/api/users/{user_id}")
-async def get_user(user_id: int, admin: dict = Depends(get_current_admin)):
-    user = await db.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+# ==================== PROMETHEUS ====================
+@app.get("/api/metrics/query")
+async def query_prometheus(query: str, admin: dict = Depends(get_current_admin)):
+    """Проксирует запросы к Prometheus (только для админов)"""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{PROMETHEUS_URL}/api/v1/query",
+                params={"query": query},
+                timeout=10
+            )
+            return JSONResponse(content=resp.json())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/metrics/query_range")
+async def query_prometheus_range(
+    query: str,
+    start: int,
+    end: int,
+    step: str = "1h",
+    admin: dict = Depends(get_current_admin)
+):
+    """Проксирует range запросы к Prometheus"""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{PROMETHEUS_URL}/api/v1/query_range",
+                params={"query": query, "start": start, "end": end, "step": step},
+                timeout=10
+            )
+            return JSONResponse(content=resp.json())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== FRONTEND PAGES ====================
 @app.get("/")
 async def root():
     return FileResponse("/frontend/login.html")

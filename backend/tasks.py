@@ -19,6 +19,7 @@ async def check_limits_and_sync_all_servers(servers_list):
     for srv in servers_list:
         if not srv['is_active']:
             continue
+        conn = None
         try:
             if srv['auth_type'] == 'local':
                 conn = LocalConnection()
@@ -34,6 +35,8 @@ async def check_limits_and_sync_all_servers(servers_list):
             server_instances[srv['id']] = AmneziaWGServer(conn, server_id=srv['id'])
         except Exception as e:
             logger.error(f"Failed to create server instance for {srv['id']}: {e}")
+            if conn:
+                await conn.close()
 
     for user_id in problem_users:
         clients_by_server = await db.get_user_clients_grouped_by_server(user_id)
@@ -58,7 +61,7 @@ async def collect_stats_periodically(interval: int = 60):
             for srv in servers:
                 if not srv['is_active']:
                     continue
-                logger.debug(f"Collecting stats for server {srv['id']} ({srv['name']})")
+                conn = None
                 try:
                     if srv['auth_type'] == 'local':
                         conn = LocalConnection()
@@ -73,9 +76,11 @@ async def collect_stats_periodically(interval: int = 60):
                         )
                     server = AmneziaWGServer(conn, server_id=srv['id'])
                     await server.collect_traffic_stats()
-                    await conn.close()
                 except Exception as e:
                     logger.error(f"Stats collection failed for server {srv['id']}: {e}", exc_info=True)
+                finally:
+                    if conn:
+                        await conn.close()
 
             await check_limits_and_sync_all_servers(servers)
 

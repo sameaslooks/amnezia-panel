@@ -96,7 +96,7 @@ def generate_client_config(
     server_public_key: str,
     server_endpoint: str,
     psk: str = '',
-    dns: str = '1.1.1.1, 1.0.0.1',
+    dns: str = '172.17.0.1, 1.1.1.1',
     **obfuscation_params
 ) -> str:
     """Генерирует конфигурацию клиента в формате AmneziaWG."""
@@ -130,7 +130,8 @@ def generate_client_config(
 def generate_amnezia_vpn_link(
     server_params: Dict[str, str],
     client: Dict[str, str],
-    obfuscation: Dict[str, str]
+    obfuscation: Dict[str, str],
+    server_name: str = ""
 ) -> str:
     """Генерирует ссылку вида vpn://... для AmneziaVPN."""
     inner_config = generate_client_config(
@@ -175,6 +176,11 @@ def generate_amnezia_vpn_link(
 
     last_config_str = json.dumps(last_config, indent=4, separators=(',', ': '), ensure_ascii=False)
 
+    if server_name:
+        description = f"{server_name}"
+    else:
+        description = "Amnezia VPN Server"
+
     server_config = {
         "containers": [
             {
@@ -205,9 +211,9 @@ def generate_amnezia_vpn_link(
             }
         ],
         "defaultContainer": "amnezia-awg2",
-        "description": "Amnezia VPN Server",
-        "dns1": "1.1.1.1",
-        "dns2": "1.0.0.1",
+        "description": description,
+        "dns1": "172.17.0.1",
+        "dns2": "1.1.1.1",
         "hostName": server_params['host'],
     }
 
