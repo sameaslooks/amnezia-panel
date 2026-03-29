@@ -387,6 +387,9 @@ AllowedIPs = {next_ip}
         host = await self._get_server_ip()
         port = server_params.get('listen_port', '32308')
 
+        server_info = await database.get_server(self.server_id)
+        server_name = server_info.get('name', '') if server_info else ''
+
         client_dict = {
             'public_key': public_key,
             'private_key': client_data['private_key'],
@@ -397,7 +400,8 @@ AllowedIPs = {next_ip}
         link = awg_utils.generate_amnezia_vpn_link(
             server_params={'host': host, 'port': port, 'public_key': server_public},
             client=client_dict,
-            obfuscation=obfuscation
+            obfuscation=obfuscation,
+            server_name=server_name
         )
         logger.debug(f"Amnezia link generated for {public_key[:8]}...")
         return link
