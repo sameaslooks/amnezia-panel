@@ -177,7 +177,7 @@ def generate_amnezia_vpn_link(
     last_config_str = json.dumps(last_config, indent=4, separators=(',', ': '), ensure_ascii=False)
 
     if server_name:
-        description = f"{server_name} | Noxum"
+        description = f"{server_name}"
     else:
         description = "Amnezia VPN Server"
 
