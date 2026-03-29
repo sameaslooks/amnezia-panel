@@ -141,39 +141,55 @@ echo "Server config created"
 
 
 def generate_awg_config():
+    """Генерирует параметры обфускации согласно документации AmneziaWG 2.0"""
     config = {}
+    
+    # Случайный порт
     config['port'] = random.randint(10000, 65000)
+    
+    # Jc: количество junk-пакетов (0-10)
     config['jc'] = random.randint(3, 8)
-    config['jmin'] = random.randint(5, 20)
-    config['jmax'] = random.randint(30, 70)
-    if config['jmin'] >= config['jmax']:
-        config['jmax'] = config['jmin'] + random.randint(10, 30)
-    config['s1'] = random.randint(30, 150)
-    config['s2'] = random.randint(20, 150)
-    config['s3'] = random.randint(1, 50)
-    config['s4'] = random.randint(5, 30)
-    h1_min = random.randint(10**9, 2*10**9)
-    h1_max = random.randint(10**9, 2*10**9)
-    config['h1'] = f"{min(h1_min, h1_max)}-{max(h1_min, h1_max)}"
     
-    h2_min = random.randint(1_900_000_000, 2_100_000_000)
-    h2_max = random.randint(2_000_000_000, 2_200_000_000)
-    config['h2'] = f"{min(h2_min, h2_max)}-{max(h2_min, h2_max)}"
+    # Jmin, Jmax: размер junk-пакетов в байтах (64-1024)
+    config['jmin'] = random.randint(64, 256)
+    config['jmax'] = random.randint(config['jmin'] + 50, 1024)
     
-    h3_min = random.randint(2_100_000_000, 2_200_000_000)
-    h3_max = random.randint(2_130_000_000, 2_150_000_000)
-    config['h3'] = f"{min(h3_min, h3_max)}-{max(h3_min, h3_max)}"
+    # S1-S3: случайный префикс для Init/Response/Cookie пакетов (0-64 байт)
+    config['s1'] = random.randint(0, 64)
+    config['s2'] = random.randint(0, 64)
+    config['s3'] = random.randint(0, 64)
     
-    h4_min = random.randint(2_140_000_000, 2_200_000_000)
-    h4_max = random.randint(2_140_000_000, 2_200_000_000)
-    config['h4'] = f"{min(h4_min, h4_max)}-{max(h4_min, h4_max)}"
+    # S4: случайный префикс для Data пакетов (0-32 байт)
+    config['s4'] = random.randint(0, 32)
     
-    i1_hex = secrets.token_hex(256)
-    config['i1'] = f"<b 0x{i1_hex}>"
+    # H1-H4: диапазоны для динамических заголовков (как в документации)
+    # Генерируем разные диапазоны для каждого типа пакетов
+    h1_min = random.randint(1000000000, 1200000000)
+    h1_max = random.randint(h1_min + 10000000, h1_min + 200000000)
+    config['h1'] = f"{h1_min}-{h1_max}"
+
+    h2_min = h1_max + random.randint(10000000, 100000000)
+    h2_max = random.randint(h2_min + 10000000, h2_min + 200000000)
+    config['h2'] = f"{h2_min}-{h2_max}"
+
+    h3_min = h2_max + random.randint(10000000, 100000000)
+    h3_max = random.randint(h3_min + 10000000, h3_min + 200000000)
+    config['h3'] = f"{h3_min}-{h3_max}"
+
+    h4_min = h3_max + random.randint(10000000, 100000000)
+    h4_max = random.randint(h4_min + 10000000, h4_min + 200000000)
+    config['h4'] = f"{h4_min}-{h4_max}"
+    
+    # I1: длинный CPS пакет с большим количеством случайных данных
+    # Генерируем длинную hex-строку как в старом конфиге
+    random_hex = secrets.token_hex(512)  # 512 байт случайных данных
+    config['i1'] = f"<b 0x{random_hex}>"
+    
     return config
 
 
 def format_config(config):
+    """Форматирует конфигурационный файл сервера."""
     lines = [
         "[Interface]",
         f"ListenPort = {config['port']}",

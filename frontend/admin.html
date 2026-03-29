@@ -65,6 +65,7 @@
 
             <!-- DASHBOARD TAB -->
             <div x-show="activeTab === 'dashboard'">
+                <!-- Верхние карточки -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
@@ -119,16 +120,66 @@
                         </div>
                     </div>
                 </div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    <div class="bg-white rounded-lg shadow-md p-4">
-                        <h3 class="text-lg font-bold mb-4">Traffic (last 30 days)</h3>
-                        <div class="h-64">
-                            <canvas id="trafficChart" x-ref="trafficChart"></canvas>
+
+                <!-- График трафика -->
+                <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+                    <h3 class="text-lg font-bold mb-4">Traffic (last 30 days)</h3>
+                    <div class="h-48">
+                        <canvas id="trafficChart" x-ref="trafficChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Графики мониторинга -->
+                <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold">📈 System Monitoring</h3>
+                        <div class="inline-flex rounded-md shadow-sm" role="group">
+                            <template x-for="range in timeRanges" :key="range.value">
+                                <button type="button"
+                                        @click="changeTimeRange(range.value)"
+                                        :class="{
+                                            'bg-blue-600 text-white': selectedTimeRange === range.value,
+                                            'bg-gray-200 text-gray-700 hover:bg-gray-300': selectedTimeRange !== range.value
+                                        }"
+                                        class="px-3 py-1 text-sm font-medium border border-gray-300 first:rounded-l-md last:rounded-r-md focus:z-10 focus:outline-none">
+                                    <span x-text="range.label"></span>
+                                </button>
+                            </template>
                         </div>
                     </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="w-full">
+                            <h4 class="text-sm font-medium text-gray-600 mb-2">CPU Usage</h4>
+                            <div class="h-48 w-full">
+                                <canvas id="cpuChart" class="w-full"></canvas>
+                            </div>
+                        </div>
+                        <div class="w-full">
+                            <h4 class="text-sm font-medium text-gray-600 mb-2">Memory Usage</h4>
+                            <div class="h-48 w-full">
+                                <canvas id="memoryChart" class="w-full"></canvas>
+                            </div>
+                        </div>
+                        <div class="w-full">
+                            <h4 class="text-sm font-medium text-gray-600 mb-2">Speedtest Download</h4>
+                            <div class="h-48 w-full">
+                                <canvas id="speedtestDownloadChart" class="w-full"></canvas>
+                            </div>
+                        </div>
+                        <div class="w-full">
+                            <h4 class="text-sm font-medium text-gray-600 mb-2">Speedtest Upload</h4>
+                            <div class="h-48 w-full">
+                                <canvas id="speedtestUploadChart" class="w-full"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Нижние блоки -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <h3 class="text-lg font-bold mb-4">Top 10 Users by Traffic</h3>
-                        <div class="overflow-y-auto max-h-64">
+                        <div class="overflow-y-auto">
                             <table class="w-full text-sm">
                                 <thead>
                                     <tr class="text-left text-gray-500">
@@ -147,40 +198,41 @@
                             </table>
                         </div>
                     </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white rounded-lg shadow-md p-4">
-                        <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-                            <span>⚠️ Issues</span>
-                            <span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded" x-text="dashboardStats.issues.length"></span>
-                        </h3>
-                        <div class="space-y-2">
-                            <template x-for="issue in dashboardStats.issues" :key="issue.server_id">
-                                <div class="text-sm p-2 bg-red-50 rounded">
-                                    <span class="font-medium" x-text="issue.server"></span>
-                                    <span class="text-red-600 text-xs block" x-text="issue.reason"></span>
+                    
+                    <div class="grid grid-cols-1 gap-6">
+                        <div class="bg-white rounded-lg shadow-md p-4">
+                            <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
+                                <span>⚠️ Issues</span>
+                                <span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded" x-text="dashboardStats.issues.length"></span>
+                            </h3>
+                            <div class="space-y-2 max-h-32 overflow-y-auto">
+                                <template x-for="issue in dashboardStats.issues" :key="issue.server_id">
+                                    <div class="text-sm p-2 bg-red-50 rounded">
+                                        <span class="font-medium" x-text="issue.server"></span>
+                                        <span class="text-red-600 text-xs block" x-text="issue.reason"></span>
+                                    </div>
+                                </template>
+                                <div x-show="!dashboardStats.issues.length" class="text-sm text-gray-500">
+                                    No issues detected
                                 </div>
-                            </template>
-                            <div x-show="!dashboardStats.issues.length" class="text-sm text-gray-500">
-                                No issues detected
                             </div>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-lg shadow-md p-4">
-                        <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-                            <span>⏳ Expiring Soon</span>
-                            <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded" x-text="dashboardStats.expiring_soon.length"></span>
-                        </h3>
-                        <div class="space-y-2">
-                            <template x-for="user in dashboardStats.expiring_soon" :key="user.id">
-                                <div class="text-sm p-2 bg-yellow-50 rounded">
-                                    <span class="font-medium" x-text="user.username"></span>
-                                    <span class="text-yellow-600 text-xs block" x-text="'Expires: ' + formatLocalDate(user.expiry_date)"></span>
+                        
+                        <div class="bg-white rounded-lg shadow-md p-4">
+                            <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
+                                <span>⏳ Expiring Soon</span>
+                                <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded" x-text="dashboardStats.expiring_soon.length"></span>
+                            </h3>
+                            <div class="space-y-2 max-h-32 overflow-y-auto">
+                                <template x-for="user in dashboardStats.expiring_soon" :key="user.id">
+                                    <div class="text-sm p-2 bg-yellow-50 rounded">
+                                        <span class="font-medium" x-text="user.username"></span>
+                                        <span class="text-yellow-600 text-xs block" x-text="'Expires: ' + formatLocalDate(user.expiry_date)"></span>
+                                    </div>
+                                </template>
+                                <div x-show="!dashboardStats.expiring_soon.length" class="text-sm text-gray-500">
+                                    No expiring subscriptions
                                 </div>
-                            </template>
-                            <div x-show="!dashboardStats.expiring_soon.length" class="text-sm text-gray-500">
-                                No expiring subscriptions
                             </div>
                         </div>
                     </div>
@@ -906,6 +958,15 @@
             syncing: false,
             qrSize: 400,
             chart: null,
+            charts: {},
+            selectedTimeRange: '1h',
+            timeRanges: [
+                { label: '1 hour', value: '1h', seconds: 3600, step: '1m' },
+                { label: '4 hours', value: '4h', seconds: 14400, step: '5m' },
+                { label: '12 hours', value: '12h', seconds: 43200, step: '10m' },
+                { label: '1 day', value: '1d', seconds: 86400, step: '30m' },
+                { label: '1 week', value: '1w', seconds: 604800, step: '2h' }
+            ],
             dashboardStats: {
                 servers: { total: 0, online: 0, issues: 0 },
                 clients: { total: 0, active: 0, blocked: 0 },
@@ -936,6 +997,7 @@
                 await this.fetchUsers();
                 this.loadDashboardStats()
                 this.fetchTraffic();
+                await this.loadMetrics();
                 setInterval(() => this.fetchTraffic(), 5000);
                 setInterval(() => this.loadDashboardStats(), 5000)
                 setInterval(() => {
@@ -945,6 +1007,16 @@
                         }
                     });
                 }, 30000);
+                setInterval(() => this.loadMetrics(), 30000);
+
+                document.addEventListener('visibilitychange', async () => {
+                    if (!document.hidden && this.activeTab === 'dashboard') {
+                        // console.log('Tab visible, refreshing charts');
+                        this.destroyAllCharts();
+                        await this.loadMetrics();
+                        await this.loadDashboardStats();
+                    }
+                });
             },
             
             async loadAllData() {
@@ -966,11 +1038,18 @@
                     const token = this.getToken();
                     let allTraffic = [];
                     for (const server of this.servers) {
+                        if (!server.is_active) continue;
                         const url = server.id === 1 ? '/api/traffic' : `/api/traffic?server_id=${server.id}`;
-                        const trafficRes = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-                        if (trafficRes.ok) {
-                            const serverTraffic = await trafficRes.json();
-                            allTraffic = allTraffic.concat(serverTraffic);
+                        try {
+                            const trafficRes = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                            if (trafficRes.ok) {
+                                const serverTraffic = await trafficRes.json();
+                                allTraffic = allTraffic.concat(serverTraffic);
+                            } else {
+                                console.warn(`Traffic fetch for server ${server.id} returned ${trafficRes.status}`);
+                            }
+                        } catch (err) {
+                            console.error(`Failed to fetch traffic for server ${server.id}:`, err);
                         }
                     }
                     const trafficMap = {};
@@ -986,6 +1065,7 @@
                     });
                 } catch (err) {
                     console.error('fetchTraffic error:', err);
+                    this.error = 'Failed to load traffic data';
                 }
             },
 
@@ -1720,93 +1800,186 @@
 
             renderTrafficChart() {
                 if (this.activeTab !== 'dashboard') return;
-
-                // Уничтожаем старый график, если есть
+                if (document.hidden) return;
+                
+                const canvas = this.$refs.trafficChart;
+                if (!canvas) return;
+                
+                // Уничтожаем старый график
                 if (this.chart) {
-                    this.chart.destroy();
+                    try { this.chart.destroy(); } catch(e) {}
                     this.chart = null;
                 }
-
+                
                 if (!this.dashboardStats.traffic_history || this.dashboardStats.traffic_history.length === 0) {
-                    console.log('No traffic history data yet');
                     return;
                 }
+                
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                
+                try {
+                    const trafficData = this.dashboardStats.traffic_history;
+                    const nonZeroData = trafficData.filter(d => d.bytes > 0);
+                    
+                    if (nonZeroData.length === 0) return;
+                    
+                    let labels, data;
+                    if (nonZeroData.length === 1) {
+                        const single = nonZeroData[0];
+                        labels = [single.date, single.date];
+                        data = [parseFloat((single.bytes / 1024 / 1024 / 1024).toFixed(2)), parseFloat((single.bytes / 1024 / 1024 / 1024).toFixed(2))];
+                    } else {
+                        labels = nonZeroData.map(d => d.date);
+                        data = nonZeroData.map(d => parseFloat((d.bytes / 1024 / 1024 / 1024).toFixed(2)));
+                    }
+                    
+                    this.chart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'Traffic (GB)',
+                                data: data,
+                                borderColor: 'rgb(59, 130, 246)',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                tension: 0.4,
+                                fill: true,
+                                pointRadius: 2,
+                                pointHoverRadius: 4,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            animation: false,
+                            plugins: { legend: { display: false } }
+                        }
+                    });
+                } catch (err) {
+                    console.error('Error creating traffic chart:', err);
+                }
+            },
 
-                requestAnimationFrame(() => {
-                    const canvas = this.$refs.trafficChart;
-                    if (!canvas) {
-                        console.log('trafficChart ref not found, retrying...');
-                        setTimeout(() => this.renderTrafficChart(), 100);
-                        return;
+            async loadMetrics() {
+                if (document.hidden) return;
+                try {
+                    const token = this.getToken();
+                    const now = Math.floor(Date.now() / 1000);
+                    const range = this.timeRanges.find(r => r.value === this.selectedTimeRange);
+                    if (!range) return;
+                    const start = now - range.seconds;
+                    const step = range.step;
+
+                    // 1. CPU
+                    const cpuQuery = `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`;
+                    const cpuRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(cpuQuery)}&start=${start}&end=${now}&step=${step}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (cpuRes.ok) {
+                        const data = await cpuRes.json();
+                        this.renderChart('cpuChart', data, 'CPU %');
                     }
 
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) return;
-
-                    try {
-                        const trafficData = this.dashboardStats.traffic_history;
-                        const nonZeroData = trafficData.filter(d => d.bytes > 0);
-                        
-                        if (nonZeroData.length === 0) {
-                            console.log('No traffic data yet');
-                            // Очисти canvas и покажи сообщение
-                            const ctx = canvas.getContext('2d');
-                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-                            ctx.font = '14px Arial';
-                            ctx.fillStyle = '#666';
-                            ctx.textAlign = 'center';
-                            ctx.fillText('No traffic data yet', canvas.width/2, canvas.height/2);
-                            return;
-                        }
-
-                        // Для одной точки добавим фиктивную вторую, чтобы график нарисовался
-                        let labels, data;
-                        if (nonZeroData.length === 1) {
-                            // Если только одна точка, дублируем её для отображения
-                            const single = nonZeroData[0];
-                            labels = [single.date, single.date]; // две одинаковые даты
-                            data = [
-                                (single.bytes / 1024 / 1024 / 1024).toFixed(2),
-                                (single.bytes / 1024 / 1024 / 1024).toFixed(2)
-                            ];
-                        } else {
-                            labels = nonZeroData.map(d => d.date);
-                            data = nonZeroData.map(d => (d.bytes / 1024 / 1024 / 1024).toFixed(2));
-                        }
-
-                        this.chart = new Chart(ctx, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Traffic (GB)',
-                                    data: data,
-                                    borderColor: 'rgb(59, 130, 246)',
-                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                    tension: 0.4,
-                                    fill: true,
-                                    pointRadius: 2,
-                                    pointHoverRadius: 4
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                animation: false,
-                                plugins: {
-                                    legend: { display: false },
-                                    tooltip: { enabled: true }
-                                },
-                                scales: {
-                                    y: {
-                                        beginAtZero: true,
-                                        grid: { color: 'rgba(0, 0, 0, 0.05)' }
-                                    }
-                                }
-                            }
+                    // 2. Memory (аналогично)
+                    const memQuery = `(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100`;
+                    const memRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(memQuery)}&start=${start}&end=${now}&step=${step}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (memRes.ok) {
+                        const data = await memRes.json();
+                        this.renderChart('memoryChart', data, 'Memory %');
+                    } else {
+                        // альтернативный запрос
+                        const altMemQuery = `(1 - ((node_memory_MemFree_bytes + node_memory_Cached_bytes + node_memory_Buffers_bytes) / node_memory_MemTotal_bytes)) * 100`;
+                        const altRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(altMemQuery)}&start=${start}&end=${now}&step=${step}`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
                         });
-                    } catch (err) {
-                        console.error('Error creating chart:', err);
+                        if (altRes.ok) {
+                            const data = await altRes.json();
+                            this.renderChart('memoryChart', data, 'Memory %');
+                        }
+                    }
+
+                    // 3. Speedtest Download
+                    const speedtestRes = await fetch(`/api/metrics/query_range?query=download_speed_bps / 1000000&start=${start}&end=${now}&step=${step}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (speedtestRes.ok) {
+                        const data = await speedtestRes.json();
+                        this.renderChart('speedtestDownloadChart', data, 'Download (Mbps)');
+                    }
+
+                    // 4. Speedtest Upload
+                    const speedtestUploadRes = await fetch(`/api/metrics/query_range?query=upload_speed_bps / 1000000&start=${start}&end=${now}&step=${step}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (speedtestUploadRes.ok) {
+                        const data = await speedtestUploadRes.json();
+                        this.renderChart('speedtestUploadChart', data, 'Upload (Mbps)');
+                    }
+
+                } catch (err) {
+                    console.error('Error loading metrics:', err);
+                }
+            },
+
+            renderChart(canvasId, data, label) {
+                if (document.hidden) return;
+                
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                
+                // Уничтожаем старый график
+                if (this.charts && this.charts[canvasId]) {
+                    try { this.charts[canvasId].destroy(); } catch(e) {}
+                    delete this.charts[canvasId];
+                }
+                
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                
+                if (!data?.data?.result?.[0]?.values?.length) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.font = '14px Arial';
+                    ctx.fillStyle = '#666';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('No data yet', canvas.width/2, canvas.height/2);
+                    return;
+                }
+                
+                const timestamps = [];
+                const values = [];
+                const series = data.data.result[0];
+                
+                series.values.forEach(point => {
+                    timestamps.push(new Date(point[0] * 1000).toLocaleTimeString());
+                    values.push(parseFloat(point[1]));
+                });
+                
+                if (values.length === 0) return;
+                
+                this.charts = this.charts || {};
+                this.charts[canvasId] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: timestamps,
+                        datasets: [{
+                            label: label,
+                            data: values,
+                            borderColor: 'rgb(59, 130, 246)',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4,
+                            fill: true,
+                            pointRadius: 2,
+                            pointHoverRadius: 4,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        animation: false
                     }
                 });
             },
@@ -1816,6 +1989,42 @@
                     this.chart.destroy();
                     this.chart = null;
                 }
+            },
+
+            destroyAllCharts() {
+                // Уничтожаем все графики
+                if (this.chart) {
+                    try {
+                        this.chart.destroy();
+                    } catch(e) {}
+                    this.chart = null;
+                }
+                
+                if (this.charts) {
+                    Object.values(this.charts).forEach(chart => {
+                        try {
+                            chart.destroy();
+                        } catch(e) {}
+                    });
+                    this.charts = {};
+                }
+                
+                // Очищаем все canvas
+                const canvases = ['trafficChart', 'cpuChart', 'memoryChart', 'networkDownloadChart', 'networkUploadChart', 'speedtestDownloadChart', 'speedtestUploadChart'];
+                canvases.forEach(id => {
+                    const canvas = document.getElementById(id);
+                    if (canvas && canvas.getContext) {
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        }
+                    }
+                });
+            },
+            
+            changeTimeRange(rangeValue) {
+                this.selectedTimeRange = rangeValue;
+                this.loadMetrics();
             },
 
             formatLocalDate(serverDateStr) {
