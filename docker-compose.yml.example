@@ -112,8 +112,6 @@ services:
     image: jraviles/prometheus_speedtest:latest
     container_name: speedtest-exporter
     restart: unless-stopped
-    ports:
-      - "9516:9516"
     networks:
       - panel-network
     command: ["--port=9516", "--address=0.0.0.0"]

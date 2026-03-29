@@ -164,21 +164,21 @@ def generate_awg_config():
     
     # H1-H4: диапазоны для динамических заголовков (как в документации)
     # Генерируем разные диапазоны для каждого типа пакетов
-    h1_min = random.randint(10**9, 2*10**9)
-    h1_max = random.randint(10**9, 2*10**9)
-    config['h1'] = f"{min(h1_min, h1_max)}-{max(h1_min, h1_max)}"
-    
-    h2_min = random.randint(1_900_000_000, 2_100_000_000)
-    h2_max = random.randint(2_000_000_000, 2_200_000_000)
-    config['h2'] = f"{min(h2_min, h2_max)}-{max(h2_min, h2_max)}"
-    
-    h3_min = random.randint(2_100_000_000, 2_200_000_000)
-    h3_max = random.randint(2_130_000_000, 2_150_000_000)
-    config['h3'] = f"{min(h3_min, h3_max)}-{max(h3_min, h3_max)}"
-    
-    h4_min = random.randint(2_140_000_000, 2_200_000_000)
-    h4_max = random.randint(2_140_000_000, 2_200_000_000)
-    config['h4'] = f"{min(h4_min, h4_max)}-{max(h4_min, h4_max)}"
+    h1_min = random.randint(1000000000, 1200000000)
+    h1_max = random.randint(h1_min + 10000000, h1_min + 200000000)
+    config['h1'] = f"{h1_min}-{h1_max}"
+
+    h2_min = h1_max + random.randint(10000000, 100000000)
+    h2_max = random.randint(h2_min + 10000000, h2_min + 200000000)
+    config['h2'] = f"{h2_min}-{h2_max}"
+
+    h3_min = h2_max + random.randint(10000000, 100000000)
+    h3_max = random.randint(h3_min + 10000000, h3_min + 200000000)
+    config['h3'] = f"{h3_min}-{h3_max}"
+
+    h4_min = h3_max + random.randint(10000000, 100000000)
+    h4_max = random.randint(h4_min + 10000000, h4_min + 200000000)
+    config['h4'] = f"{h4_min}-{h4_max}"
     
     # I1: длинный CPS пакет с большим количеством случайных данных
     # Генерируем длинную hex-строку как в старом конфиге
