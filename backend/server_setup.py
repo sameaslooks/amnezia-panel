@@ -141,17 +141,29 @@ echo "Server config created"
 
 
 def generate_awg_config():
+    """Генерирует параметры обфускации согласно документации AmneziaWG 2.0"""
     config = {}
+    
+    # Случайный порт
     config['port'] = random.randint(10000, 65000)
+    
+    # Jc: количество junk-пакетов (0-10)
     config['jc'] = random.randint(3, 8)
-    config['jmin'] = random.randint(5, 20)
-    config['jmax'] = random.randint(30, 70)
-    if config['jmin'] >= config['jmax']:
-        config['jmax'] = config['jmin'] + random.randint(10, 30)
-    config['s1'] = random.randint(30, 150)
-    config['s2'] = random.randint(20, 150)
-    config['s3'] = random.randint(1, 50)
-    config['s4'] = random.randint(5, 30)
+    
+    # Jmin, Jmax: размер junk-пакетов в байтах (64-1024)
+    config['jmin'] = random.randint(64, 256)
+    config['jmax'] = random.randint(config['jmin'] + 50, 1024)
+    
+    # S1-S3: случайный префикс для Init/Response/Cookie пакетов (0-64 байт)
+    config['s1'] = random.randint(0, 64)
+    config['s2'] = random.randint(0, 64)
+    config['s3'] = random.randint(0, 64)
+    
+    # S4: случайный префикс для Data пакетов (0-32 байт)
+    config['s4'] = random.randint(0, 32)
+    
+    # H1-H4: диапазоны для динамических заголовков (как в документации)
+    # Генерируем разные диапазоны для каждого типа пакетов
     h1_min = random.randint(10**9, 2*10**9)
     h1_max = random.randint(10**9, 2*10**9)
     config['h1'] = f"{min(h1_min, h1_max)}-{max(h1_min, h1_max)}"
@@ -168,12 +180,16 @@ def generate_awg_config():
     h4_max = random.randint(2_140_000_000, 2_200_000_000)
     config['h4'] = f"{min(h4_min, h4_max)}-{max(h4_min, h4_max)}"
     
-    i1_hex = secrets.token_hex(256)
-    config['i1'] = f"<b 0x{i1_hex}>"
+    # I1: длинный CPS пакет с большим количеством случайных данных
+    # Генерируем длинную hex-строку как в старом конфиге
+    random_hex = secrets.token_hex(512)  # 512 байт случайных данных
+    config['i1'] = f"<b 0x{random_hex}>"
+    
     return config
 
 
 def format_config(config):
+    """Форматирует конфигурационный файл сервера."""
     lines = [
         "[Interface]",
         f"ListenPort = {config['port']}",
