@@ -17,6 +17,33 @@
         .animate-pulse {
             animation: pulse 1.5s ease-in-out infinite;
         }
+
+        @keyframes loader-rotate {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+        .loader {
+            position: relative;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: loader-rotate 1s linear infinite;
+        }
+        .loader::after {
+            content: '';
+            box-sizing: border-box;
+            position: absolute;
+            inset: 0px;
+            border-radius: 50%;
+            border: 5px solid #3b82f6;
+            border-bottom-color: transparent;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -933,6 +960,15 @@
             </div>
         </div>
 
+        <!-- Global Loading Overlay -->
+        <div x-show="globalLoading" 
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            style="backdrop-filter: blur(2px);">
+            <div class="bg-white rounded-lg p-8 shadow-2xl flex flex-col items-center">
+                <div class="loader"></div>
+                <p class="mt-4 text-gray-700 font-medium" x-text="loadingMessage || 'Loading...'"></p>
+            </div>
+        </div>
     <script>
     function adminPanel() {
         return {
@@ -960,6 +996,9 @@
             newServer: { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' },
             editingServer: { id: null, name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '', is_active: true },
             showEditServerModal: false,
+            showEditConfigModal: false,
+            editingServerConfig: '',
+            editingConfigServerId: null,
             showConfigModal: false,
             editingConfig: '',
             currentServerForConfig: null,
@@ -975,6 +1014,15 @@
             showUserLimitsModal: false,
             showDisabledUsers: true,
             editingUserLimits: { user_id: null, value: 0, unit: 'GB', expiry_date: '' },
+            // Флаги, загружены ли данные для каждой вкладки
+            serversLoaded: false,
+            usersLoaded: false,
+            clientsLoaded: false,
+            dashboardStatsLoaded: false,
+            metricsLoaded: false,
+            // Глобальная загрузка
+            globalLoading: false,
+            loadingMessage: '',
             syncing: false,
             qrSize: 400,
             chart: null,
@@ -1009,32 +1057,73 @@
                     return;
                 }
                 this.currentUser = username;
-                await this.fetchServers();
-                if (this.servers.length > 0) {
-                    this.selectedServerId = this.servers[0].id;
-                }
-                await this.loadAllData();
-                await this.fetchUsers();
-                this.loadDashboardStats()
-                this.fetchTraffic();
-                await this.loadMetrics();
-                setInterval(() => this.fetchTraffic(), 5000);
-                setInterval(() => this.loadDashboardStats(), 5000)
-                setInterval(() => {
-                    this.servers.forEach(server => {
-                        if (server.is_active) {
-                            this.fetchServerStatus(server.id);
-                        }
-                    });
-                }, 30000);
-                setInterval(() => this.loadMetrics(), 30000);
 
-                document.addEventListener('visibilitychange', async () => {
-                    if (!document.hidden && this.activeTab === 'dashboard') {
-                        // console.log('Tab visible, refreshing charts');
-                        this.destroyAllCharts();
-                        await this.loadMetrics();
-                        await this.loadDashboardStats();
+                // Загружаем только данные для активной вкладки (по умолчанию Dashboard)
+                await this.loadDashboardStatsIfNeeded();
+                await this.loadMetricsIfNeeded();
+
+                // Загружаем серверы (нужны почти везде, но можно отложить)
+                await this.loadServersIfNeeded();
+
+                // Настройка периодических обновлений
+                this.intervals = [];
+
+                // Обновление трафика (актуально для вкладок Clients и Dashboard)
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'clients' || this.activeTab === 'dashboard') {
+                        this.fetchTraffic();
+                    }
+                }, 5000));
+
+                // Статистика дашборда – только на вкладке Dashboard
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'dashboard') {
+                        this.loadDashboardStatsIfNeeded();
+                    }
+                }, 5000));
+
+                // Статусы серверов – только на вкладке Servers
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'servers') {
+                        this.servers.forEach(server => {
+                            if (server.is_active && server.id !== 1) {
+                                this.fetchServerStatus(server.id);
+                            }
+                        });
+                    }
+                }, 30000));
+
+                // Метрики – только на Dashboard
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'dashboard') {
+                        this.loadMetricsIfNeeded();
+                    }
+                }, 30000));
+
+                // Следим за сменой вкладки и подгружаем данные при первом открытии
+                this.$watch('activeTab', async (newTab) => {
+                    if (newTab === 'servers') {
+                        this.serversLoaded = false;
+                        await this.loadServersIfNeeded();
+                    } else if (newTab === 'users') {
+                        this.usersLoaded = false;
+                        await this.loadUsersIfNeeded();
+                    } else if (newTab === 'clients') {
+                        this.clientsLoaded = false;
+                        await this.loadClientsIfNeeded();
+                        await this.fetchTraffic(); // обновить трафик сразу
+                    } else if (newTab === 'dashboard') {
+                        this.dashboardStatsLoaded = false;
+                        this.metricsLoaded = false;
+                        await this.loadDashboardStatsIfNeeded();
+                        await this.loadMetricsIfNeeded();
+                    }
+                });
+
+                // Чистка интервалов при уходе со страницы
+                window.addEventListener('beforeunload', () => {
+                    if (this.intervals) {
+                        this.intervals.forEach(clearInterval);
                     }
                 });
             },
@@ -1090,94 +1179,99 @@
             },
 
             async addClientModal() {
-                this.adding = true;
-                this.error = '';
-                this.success = '';
-                try {
-                    if (!this.selectedUserId) {
-                        this.error = 'Please select a user';
-                        return;
+                await this.withGlobalLoading(async () => {
+                    this.adding = true;
+                    this.error = '';
+                    this.success = '';
+                    try {
+                        if (!this.selectedUserId) {
+                            this.error = 'Please select a user';
+                            return;
+                        }
+                        const url = this.selectedServerId && this.selectedServerId !== 1
+                            ? `/api/clients?server_id=${this.selectedServerId}`
+                            : '/api/clients';
+                        const response = await fetch(url, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${this.getToken()}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                name: this.newClientName,
+                                user_id: this.selectedUserId
+                            })
+                        });
+                        if (response.ok) {
+                            const newClient = await response.json();
+                            const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
+                            newClient.server_name = server?.name || 'local';
+                            newClient.server_id = this.selectedServerId || 1;
+                            this.clients.push(newClient);
+                            this.newClientName = '';
+                            this.success = 'Client added successfully';
+                            await this.loadAllData();
+                            await this.fetchUsers();   // ← добавить
+                            setTimeout(() => this.success = '', 3000);
+                            this.showAddClientModal = false;
+                            this.showConfig(newClient);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to add client';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to add client';
+                    } finally {
+                        this.adding = false;
                     }
-                    const url = this.selectedServerId && this.selectedServerId !== 1
-                        ? `/api/clients?server_id=${this.selectedServerId}`
-                        : '/api/clients';
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${this.getToken()}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            name: this.newClientName,
-                            user_id: this.selectedUserId
-                        })
-                    });
-                    if (response.ok) {
-                        const newClient = await response.json();
-                        const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
-                        newClient.server_name = server?.name || 'local';
-                        newClient.server_id = this.selectedServerId || 1;
-                        this.clients.push(newClient);
-                        this.newClientName = '';
-                        this.success = 'Client added successfully';
-                        this.loadAllData();
-                        setTimeout(() => this.success = '', 3000);
-                        this.showAddClientModal = false;
-                        this.showConfig(newClient);
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to add client';
-                    }
-                } catch (err) {
-                    this.error = 'Failed to add client';
-                } finally {
-                    this.adding = false;
-                }
+                }, 'Adding client...');
             },
 
             async showConfig(client) {
-                try {
-                    let config = client.config;
-                    if (!config) {
-                        const url = client.server_id
-                            ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
-                            : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
-                        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${this.getToken()}` } });
-                        if (response.ok) {
-                            const data = await response.json();
-                            config = data.config;
-                        } else {
-                            this.error = 'Failed to get config';
+                await this.withGlobalLoading(async () => {
+                    try {
+                        let config = client.config;
+                        if (!config) {
+                            const url = client.server_id
+                                ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
+                                : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
+                            const response = await fetch(url, { headers: { 'Authorization': `Bearer ${this.getToken()}` } });
+                            if (response.ok) {
+                                const data = await response.json();
+                                config = data.config;
+                            } else {
+                                this.error = 'Failed to get config';
+                                return;
+                            }
+                        }
+                        if (!config) {
+                            this.error = 'Config is empty';
                             return;
                         }
-                    }
-                    if (!config) {
-                        this.error = 'Config is empty';
-                        return;
-                    }
-                    this.selectedConfig = config;
-                    this.selectedClientName = client.name;
-                    this.showConfigModal = true;
-                    await this.$nextTick();
-                    setTimeout(() => {
-                        const qrContainer = document.getElementById('qrcode');
-                        if (qrContainer && config) {
-                            qrContainer.innerHTML = '';
-                            QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
+                        this.selectedConfig = config;
+                        this.selectedClientName = client.name;
+                        this.showConfigModal = true;
+                        await this.$nextTick();
+                        setTimeout(() => {
+                            const qrContainer = document.getElementById('qrcode');
+                            if (qrContainer && config) {
+                                qrContainer.innerHTML = '';
+                                QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
+                            }
+                        }, 50);
+                        const linkResponse = await fetch(
+                            `/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`,
+                            { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
+                        );
+                        if (linkResponse.ok) {
+                            const linkData = await linkResponse.json();
+                            this.amneziaLink = linkData.link;
                         }
-                    }, 50);
-                    const linkResponse = await fetch(
-                        `/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`,
-                        { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
-                    );
-                    if (linkResponse.ok) {
-                        const linkData = await linkResponse.json();
-                        this.amneziaLink = linkData.link;
+                    } catch (err) {
+                        console.error('showConfig error:', err);
+                        this.error = 'Failed to get config';
                     }
-                } catch (err) {
-                    console.error('showConfig error:', err);
-                    this.error = 'Failed to get config';
-                }
+                }, 'Loading config...');
             },
 
             downloadConfig() {
@@ -1191,24 +1285,27 @@
             },
 
             async deleteClient(publicKey, clientName) {
-                if (!confirm(`Are you sure you want to delete ${clientName}?`)) return;
-                try {
-                    const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.clients = this.clients.filter(c => c.public_key !== publicKey);
-                        this.success = 'Client deleted successfully';
-                        this.loadAllData();
-                        setTimeout(() => this.success = '', 3000);
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to delete client';
+                await this.withGlobalLoading(async () => {
+                    if (!confirm(`Are you sure you want to delete ${clientName}?`)) return;
+                    try {
+                        const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.clients = this.clients.filter(c => c.public_key !== publicKey);
+                            this.success = 'Client deleted successfully';
+                            await this.loadAllData();
+                            await this.fetchUsers();   // ← добавить
+                            setTimeout(() => this.success = '', 3000);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to delete client';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to delete client';
                     }
-                } catch (err) {
-                    this.error = 'Failed to delete client';
-                }
+                }, 'Deleting client...');
             },
 
             formatBytes(bytes) {
@@ -1227,25 +1324,30 @@
             },
 
             async addUser() {
-                this.addingUser = true;
-                try {
-                    const response = await fetch('/api/users', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(this.newUser)
-                    });
-                    if (response.ok) {
-                        this.newUser = { username: '', password: '', role: 'user' };
-                        this.success = 'User created successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showAddUserModal = false;
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to create user';
+                await this.withGlobalLoading(async () => {
+                    this.addingUser = true;
+                    try {
+                        const response = await fetch('/api/users', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.newUser)
+                        });
+                        if (response.ok) {
+                            this.newUser = { username: '', password: '', role: 'user' };
+                            this.success = 'User created successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showAddUserModal = false;
+                            this.fetchUsers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to create user';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to create user';
+                    } finally {
+                        this.addingUser = false;
                     }
-                } catch (err) { this.error = 'Failed to create user'; }
-                finally { this.addingUser = false; }
+                }, 'Adding user...');
             },
 
             editUser(user) {
@@ -1258,56 +1360,60 @@
             },
 
             async saveUser() {
-                this.savingUser = true;
-                try {
-                    const response = await fetch(`/api/users/${this.editingUser.id}`, {
-                        method: 'PUT',
-                        headers: { 
-                            'Authorization': `Bearer ${this.getToken()}`, 
-                            'Content-Type': 'application/json' 
-                        },
-                        body: JSON.stringify({
-                            username: this.editingUser.username || null,
-                            password: this.editingUser.password || null,
-                            role: this.editingUser.role || null,
-                            config_limit: this.editingUser.config_limit
-                        })
-                    });
-                    if (response.ok) {
-                        this.success = 'User updated successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showEditModal = false;
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to update user';
+                await this.withGlobalLoading(async () => {
+                    this.savingUser = true;
+                    try {
+                        const response = await fetch(`/api/users/${this.editingUser.id}`, {
+                            method: 'PUT',
+                            headers: { 
+                                'Authorization': `Bearer ${this.getToken()}`, 
+                                'Content-Type': 'application/json' 
+                            },
+                            body: JSON.stringify({
+                                username: this.editingUser.username || null,
+                                password: this.editingUser.password || null,
+                                role: this.editingUser.role || null,
+                                config_limit: this.editingUser.config_limit
+                            })
+                        });
+                        if (response.ok) {
+                            this.success = 'User updated successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showEditModal = false;
+                            this.fetchUsers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to update user';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to update user';
+                    } finally {
+                        this.savingUser = false;
                     }
-                } catch (err) { 
-                    this.error = 'Failed to update user'; 
-                } finally { 
-                    this.savingUser = false; 
-                }
+                }, 'Saving user...');
             },
             
             async toggleUserStatus(user) {
-                const action = user.is_disabled ? 'enable' : 'disable';
-                if (!confirm(`Are you sure you want to ${action} user "${user.username}"?`)) return;
-                try {
-                    const response = await fetch(`/api/users/${user.id}/${action}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.success = `User ${action}d successfully`;
-                        setTimeout(() => this.success = '', 3000);
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || `Failed to ${action} user`;
+                await this.withGlobalLoading(async () => {
+                    const action = user.is_disabled ? 'enable' : 'disable';
+                    if (!confirm(`Are you sure you want to ${action} user "${user.username}"?`)) return;
+                    try {
+                        const response = await fetch(`/api/users/${user.id}/${action}`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.success = `User ${action}d successfully`;
+                            setTimeout(() => this.success = '', 3000);
+                            this.fetchUsers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || `Failed to ${action} user`;
+                        }
+                    } catch (err) {
+                        this.error = `Failed to ${action} user`;
                     }
-                } catch (err) {
-                    this.error = `Failed to ${action} user`;
-                }
+                }, 'Changing user status...');
             },
 
             deleteUserConfirm(user) {
@@ -1316,31 +1422,29 @@
             },
 
             async deleteUser(userId) {
-                try {
-                    const response = await fetch(`/api/users/${userId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.success = 'User deleted successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to delete user';
+                await this.withGlobalLoading(async () => {
+                    try {
+                        const response = await fetch(`/api/users/${userId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.success = 'User deleted successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            // Обновляем списки
+                            await this.fetchUsers();
+                            await this.loadAllData();
+                            // Сбрасываем флаги, чтобы при следующем открытии данные подгрузились заново
+                            this.usersLoaded = false;
+                            this.clientsLoaded = false;
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to delete user';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to delete user';
                     }
-                } catch (err) { this.error = 'Failed to delete user'; }
-            },
-
-            copyToClipboard(text) {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(text).then(() => {
-                        this.success = 'Link copied!';
-                        setTimeout(() => this.success = '', 2000);
-                    }).catch(() => this.fallbackCopy(text));
-                } else {
-                    this.fallbackCopy(text);
-                }
+                }, 'Deleting user...');
             },
 
             fallbackCopy(text) {
@@ -1413,54 +1517,58 @@
             },
 
             async addServer() {
-                this.addingServer = true;
-                try {
-                    const response = await fetch('/api/servers', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(this.newServer)
-                    });
-                    if (response.ok) {
-                        this.newServer = { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' };
-                        this.success = 'Server added successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showAddServerModal = false;
-                        this.fetchServers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to add server';
-                    }
-                } catch (err) { this.error = 'Failed to add server'; }
-                finally { this.addingServer = false; }
+                await this.withGlobalLoading(async () => {
+                    this.addingServer = true;
+                    try {
+                        const response = await fetch('/api/servers', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.newServer)
+                        });
+                        if (response.ok) {
+                            this.newServer = { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' };
+                            this.success = 'Server added successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showAddServerModal = false;
+                            this.fetchServers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to add server';
+                        }
+                    } catch (err) { this.error = 'Failed to add server'; }
+                    finally { this.addingServer = false; }
+                }, 'Adding server...');
             },
 
             async testServer(serverId) {
-                const server = this.servers.find(s => s.id === serverId);
-                if (!server) return;
-                if (server.testing === undefined) {
-                    this.$set(server, 'testing', true);
-                } else {
-                    server.testing = true;
-                }
-                try {
-                    const response = await fetch(`/api/servers/${serverId}/test`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.success = 'Connection successful';
-                        await this.fetchServerStatus(serverId);
+                await this.withGlobalLoading(async () => {
+                    const server = this.servers.find(s => s.id === serverId);
+                    if (!server) return;
+                    if (server.testing === undefined) {
+                        this.$set(server, 'testing', true);
                     } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Connection failed';
+                        server.testing = true;
                     }
-                } catch (err) {
-                    this.error = 'Connection test failed';
-                } finally {
-                    server.testing = false;
-                    setTimeout(() => this.success = '', 3000);
-                    setTimeout(() => this.error = '', 3000);
-                }
+                    try {
+                        const response = await fetch(`/api/servers/${serverId}/test`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.success = 'Connection successful';
+                            await this.fetchServerStatus(serverId);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Connection failed';
+                        }
+                    } catch (err) {
+                        this.error = 'Connection test failed';
+                    } finally {
+                        server.testing = false;
+                        setTimeout(() => this.success = '', 3000);
+                        setTimeout(() => this.error = '', 3000);
+                    }
+                }, 'Testing server...');
             },
 
             async setupServer(serverId) {
@@ -1493,41 +1601,46 @@
 
             async deleteServer(serverId, serverName) {
                 if (!confirm(`Are you sure you want to delete server "${serverName}"?`)) return;
-                try {
-                    const response = await fetch(`/api/servers/${serverId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.servers = this.servers.filter(s => s.id !== serverId);
-                        this.success = 'Server deleted successfully';
-                        setTimeout(() => this.success = '', 3000);
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to delete server';
-                    }
-                } catch (err) { this.error = 'Failed to delete server'; }
+                await this.withGlobalLoading(async () => {
+                    try {
+                        const response = await fetch(`/api/servers/${serverId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.servers = this.servers.filter(s => s.id !== serverId);
+                            this.success = 'Server deleted successfully';
+                            setTimeout(() => this.success = '', 3000);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to delete server';
+                        }
+                    } catch (err) { this.error = 'Failed to delete server'; }
+                }, 'Deleting server...');
             },
 
             async syncClients() {
-                this.syncing = true;
-                this.error = '';
-                try {
-                    const token = this.getToken();
-                    for (const server of this.servers) {
-                        if (!server.is_active) continue;
-                        const url = `/api/clients?server_id=${server.id}`;
-                        await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                await this.withGlobalLoading(async () => {
+                    this.syncing = true;
+                    this.error = '';
+                    try {
+                        const token = this.getToken();
+                        for (const server of this.servers) {
+                            if (!server.is_active) continue;
+                            const url = `/api/clients?server_id=${server.id}`;
+                            await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                        }
+                        await this.loadAllData();
+                        await this.fetchUsers();
+                        this.success = 'Clients synchronized successfully';
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (err) {
+                        console.error('syncClients error:', err);
+                        this.error = 'Failed to sync clients';
+                    } finally {
+                        this.syncing = false;
                     }
-                    await this.loadAllData();
-                    this.success = 'Clients synchronized successfully';
-                    setTimeout(() => this.success = '', 3000);
-                } catch (err) {
-                    console.error('syncClients error:', err);
-                    this.error = 'Failed to sync clients';
-                } finally {
-                    this.syncing = false;
-                }
+                }, 'Syncing clients...');
             },
 
             editUserLimits(group) {
@@ -1573,48 +1686,48 @@
             },
 
             async saveUserLimits() {
-                const user_id = this.editingUserLimits.user_id;
-                const multiplier = { 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024, 'TB': 1024 * 1024 * 1024 * 1024 };
-                let limitBytes = this.editingUserLimits.value * multiplier[this.editingUserLimits.unit];
-                limitBytes = Math.round(limitBytes);
+                await this.withGlobalLoading(async () => {
+                    const user_id = this.editingUserLimits.user_id;
+                    const multiplier = { 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024, 'TB': 1024 * 1024 * 1024 * 1024 };
+                    let limitBytes = this.editingUserLimits.value * multiplier[this.editingUserLimits.unit];
+                    limitBytes = Math.round(limitBytes);
 
-                try {
-                    const limitResponse = await fetch(`/api/users/${user_id}/traffic-limit?limit_bytes=${limitBytes}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (!limitResponse.ok) {
-                        const err = await limitResponse.json();
-                        this.error = err.detail || 'Failed to update limit';
-                        return;
+                    try {
+                        // Установка лимита трафика
+                        const limitResponse = await fetch(`/api/users/${user_id}/traffic-limit?limit_bytes=${limitBytes}`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (!limitResponse.ok) {
+                            const err = await limitResponse.json();
+                            this.error = err.detail || 'Failed to update limit';
+                            return;
+                        }
+
+                        // Установка expiry
+                        let expiryToSend = null;
+                        if (this.editingUserLimits.expiry_date) {
+                            expiryToSend = this.formatServerDate(this.editingUserLimits.expiry_date);
+                        }
+                        const expiryResponse = await fetch(`/api/users/${user_id}/expiry`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ expiry_date: expiryToSend })
+                        });
+                        if (!expiryResponse.ok) {
+                            const err = await expiryResponse.json();
+                            this.error = err.detail || 'Failed to update expiry';
+                            return;
+                        }
+
+                        await this.loadAllData();
+                        await this.fetchUsers();
+                        this.success = 'User limits updated successfully';
+                        this.showUserLimitsModal = false;
+                    } catch (err) {
+                        this.error = 'Failed to save user limits';
                     }
-
-                    let expiryToSend = null;
-                    if (this.editingUserLimits.expiry_date) {
-                        expiryToSend = this.formatServerDate(this.editingUserLimits.expiry_date);
-                    }
-
-                    const expiryResponse = await fetch(`/api/users/${user_id}/expiry`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ expiry_date: expiryToSend })
-                    });
-                    if (!expiryResponse.ok) {
-                        const err = await expiryResponse.json();
-                        this.error = err.detail || 'Failed to update expiry';
-                        return;
-                    }
-
-                    await this.loadAllData();
-                    await this.fetchUsers();
-                    this.success = 'User limits updated successfully';
-                    this.showUserLimitsModal = false;
-                } catch (err) {
-                    this.error = 'Failed to save user limits';
-                } finally {
-                    setTimeout(() => this.success = '', 3000);
-                    setTimeout(() => this.error = '', 3000);
-                }
+                }, 'Saving user limits...');
             },
 
             logout() {
@@ -1667,46 +1780,48 @@
             },
 
             async updateServer() {
-                this.savingServer = true;
-                try {
-                    const updateData = {
-                        name: this.editingServer.name,
-                        host: this.editingServer.host || null,
-                        port: parseInt(this.editingServer.port) || 22,
-                        username: this.editingServer.username || null,
-                        auth_type: this.editingServer.auth_type,
-                        is_active: this.editingServer.is_active
-                    };
-                    if (this.editingServer.password && this.editingServer.password.trim() !== '') {
-                        updateData.password = this.editingServer.password;
-                    }
-                    if (this.editingServer.private_key && this.editingServer.private_key.trim() !== '') {
-                        updateData.private_key = this.editingServer.private_key;
-                    }
+                await this.withGlobalLoading(async () => {
+                    this.savingServer = true;
+                    try {
+                        const updateData = {
+                            name: this.editingServer.name,
+                            host: this.editingServer.host || null,
+                            port: parseInt(this.editingServer.port) || 22,
+                            username: this.editingServer.username || null,
+                            auth_type: this.editingServer.auth_type,
+                            is_active: this.editingServer.is_active
+                        };
+                        if (this.editingServer.password && this.editingServer.password.trim() !== '') {
+                            updateData.password = this.editingServer.password;
+                        }
+                        if (this.editingServer.private_key && this.editingServer.private_key.trim() !== '') {
+                            updateData.private_key = this.editingServer.private_key;
+                        }
 
-                    const response = await fetch(`/api/servers/${this.editingServer.id}`, {
-                        method: 'PUT',
-                        headers: {
-                            'Authorization': `Bearer ${this.getToken()}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(updateData)
-                    });
+                        const response = await fetch(`/api/servers/${this.editingServer.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${this.getToken()}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(updateData)
+                        });
 
-                    if (response.ok) {
-                        this.success = 'Server updated successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showEditServerModal = false;
-                        await this.fetchServers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to update server';
+                        if (response.ok) {
+                            this.success = 'Server updated successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showEditServerModal = false;
+                            await this.fetchServers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to update server';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to update server';
+                    } finally {
+                        this.savingServer = false;
                     }
-                } catch (err) {
-                    this.error = 'Failed to update server';
-                } finally {
-                    this.savingServer = false;
-                }
+                }, 'Updating server...');
             },
 
             async toggleServer(server) {
@@ -2094,29 +2209,23 @@
             },
 
             async editServerConfig(server) {
-                this.editingConfigServerId = server.id;
-                this.showEditConfigModal = true;
-                this.loading = true;
-                try {
+                await this.withGlobalLoading(async () => {
                     const response = await fetch(`/api/servers/${server.id}/config`, {
                         headers: { 'Authorization': `Bearer ${this.getToken()}` }
                     });
                     if (response.ok) {
                         const data = await response.json();
                         this.editingServerConfig = data.config;
+                        this.editingConfigServerId = server.id;
+                        this.showEditConfigModal = true;
                     } else {
                         this.error = 'Failed to load config';
                     }
-                } catch (err) {
-                    this.error = 'Failed to load config';
-                } finally {
-                    this.loading = false;
-                }
+                }, 'Loading config...');
             },
 
             async saveServerConfig() {
-                this.saving = true;
-                try {
+                await this.withGlobalLoading(async () => {
                     const response = await fetch(`/api/servers/${this.editingConfigServerId}/config`, {
                         method: 'POST',
                         headers: {
@@ -2132,10 +2241,72 @@
                         const error = await response.json();
                         this.error = error.detail || 'Failed to update config';
                     }
-                } catch (err) {
-                    this.error = 'Failed to update config';
+                }, 'Saving config...');
+            },
+
+            showGlobalLoading(message = 'Loading...') {
+                this.globalLoading = true;
+                this.loadingMessage = message;
+            },
+
+            hideGlobalLoading() {
+                this.globalLoading = false;
+                this.loadingMessage = '';
+            },
+
+            async withGlobalLoading(callback, message = 'Loading...') {
+                try {
+                    this.showGlobalLoading(message);
+                    await callback();
                 } finally {
-                    this.saving = false;
+                    this.hideGlobalLoading();
+                }
+            },
+
+            async loadServersIfNeeded() {
+                if (!this.serversLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.fetchServers();
+                        this.serversLoaded = true;
+                    }, 'Loading servers...');
+                }
+            },
+
+            async loadUsersIfNeeded() {
+                if (!this.usersLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.fetchUsers();
+                        this.usersLoaded = true;
+                    }, 'Loading users...');
+                }
+            },
+
+            async loadClientsIfNeeded() {
+                if (!this.clientsLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        // Загружаем и клиентов, и пользователей
+                        await this.loadAllData();
+                        await this.fetchUsers();
+                        this.clientsLoaded = true;
+                    }, 'Loading clients...');
+                }
+            },
+
+            async loadDashboardStatsIfNeeded() {
+                if (!this.dashboardStatsLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.loadDashboardStats();
+                        this.dashboardStatsLoaded = true;
+                    }, 'Loading dashboard...');
+                }
+            },
+
+            async loadMetricsIfNeeded() {
+                if (!this.metricsLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.loadMetrics();
+                        this.metricsLoaded = true;
+                    }, 'Loading metrics...');
                 }
             },
         };
