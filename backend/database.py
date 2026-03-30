@@ -341,7 +341,6 @@ async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
 # ---------- Клиенты ----------
 async def update_traffic(public_key: str, received: int, sent: int, endpoint: Optional[str] = None,
                          server_instance=None):
-    logger.info(f"update_traffic called for {public_key[:8]}..., endpoint={endpoint}")
     client = await get_client_by_public_key(public_key)
     if not client:
         return
