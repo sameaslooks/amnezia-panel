@@ -307,6 +307,11 @@ AllowedIPs = {next_ip}
         traffic = awg_utils.parse_traffic_output(output)
         logger.debug(f"get_traffic returned {len(traffic)} entries")
         return traffic
+    
+    async def get_traffic_stats(self) -> List[Dict]:
+        """Возвращает полную статистику (трафик, handshake, endpoint)."""
+        output = await self.conn.run_command("awg show")
+        return awg_utils.parse_traffic_output(output)
 
     async def get_traffic_bytes(self) -> Dict[str, Dict]:
         traffic_list = await self.get_traffic()
@@ -331,18 +336,16 @@ AllowedIPs = {next_ip}
 
     async def collect_traffic_stats(self):
         async with _stats_collect_lock:
-            stats = await self.get_traffic_bytes()
+            stats = await self.get_traffic_stats()
             if not stats:
                 return
-            for pub_key, data in stats.items():
-                try:
-                    received = data["received"]
-                    sent = data["sent"]
-                    await database.update_traffic(pub_key, received, sent, self)
-                except Exception:
-                    logger.exception(
-                        f"Failed to collect traffic for {pub_key[:8]} on server {self.server_id}"
-                    )
+            for stat in stats:
+                pub_key = stat['public_key']
+                endpoint = stat.get('endpoint')
+                transfer = stat.get('transfer', '')
+                received, sent = awg_utils.parse_transfer(transfer)
+                logger.info(f"Collect stats: {stat['public_key'][:8]}... endpoint={stat.get('endpoint')}")
+                await database.update_traffic(pub_key, received, sent, endpoint, self)
 
     async def block_client(self, public_key: str) -> bool:
         ip = await self._get_client_ip(public_key)

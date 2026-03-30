@@ -628,6 +628,7 @@
                                             <th class="px-4 py-2 text-left" x-text="t('ip')"></th>
                                             <th class="px-4 py-2 text-left" x-text="t('traffic')"></th>
                                             <th class="px-4 py-2 text-left" x-text="t('handshake')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('last_ip')"></th>
                                             <th class="px-4 py-2 text-left" x-text="t('status')"></th>
                                             <th class="px-4 py-2 text-left" x-text="t('actions')"></th>
                                         </tr>
@@ -643,6 +644,14 @@
                                                 <td class="px-4 py-2 font-mono text-sm" x-text="client.ip"></td>
                                                 <td class="px-4 py-2" x-text="client.traffic || '0 B'"></td>
                                                 <td class="px-4 py-2 text-sm" x-text="client.handshake || t('never')"></td>
+                                                <td class="px-4 py-2 font-mono text-sm">
+                                                    <span x-text="client.last_ip || '—'"></span>
+                                                    <button @click="showIpHistory(client.id)" 
+                                                            class="ml-1 text-blue-500 hover:text-blue-700 text-xs" 
+                                                            title="История IP">
+                                                        📋
+                                                    </button>
+                                                </td>
                                                 <td class="px-4 py-2">
                                                     <span x-show="client.is_active" class="text-green-600 font-medium" x-text="t('active')"></span>
                                                     <span x-show="!client.is_active" class="text-red-600 font-medium" x-text="t('blocked')"></span>
@@ -1016,6 +1025,53 @@
             </div>
         </div>
 
+        <!-- IP History Modal -->
+        <div x-show="showIpHistoryModal" 
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            @click.self="showIpHistoryModal = false">
+            <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">
+                        История IP для клиента <span x-text="selectedClientName"></span>
+                    </h3>
+                    <button @click="showIpHistoryModal = false" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 text-xl">✕</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="bg-gray-100 dark:bg-gray-700">
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">IP адрес</th>
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Впервые замечен</th>
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Последний раз</th>
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Кол-во</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="record in ipHistory" :key="record.ip">
+                                <tr class="border-t border-gray-200 dark:border-gray-700">
+                                    <td class="px-4 py-2 font-mono text-sm text-gray-800 dark:text-gray-200" x-text="record.ip">--
+                                    <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400" x-text="formatLocalDate(record.first_seen)">--
+                                    <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400" x-text="formatLocalDate(record.last_seen)">--
+                                    <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400" x-text="record.count">--
+                                </tr>
+                            </template>
+                            <tr x-show="!ipHistory.length">
+                                <td colspan="4" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400">
+                                    История IP отсутствует
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex justify-end mt-4">
+                    <button @click="showIpHistoryModal = false" 
+                            class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                        Закрыть
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Global Loading Overlay -->
         <div x-show="globalLoading" 
             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
@@ -1098,6 +1154,9 @@
                 expiring_soon: [],
                 traffic_history: []
             },
+            showIpHistoryModal: false,
+            ipHistory: [],
+            selectedClientName: '',
             // Тема и язык
             theme: localStorage.getItem('theme') || 'light',
             language: localStorage.getItem('language') || 'ru',
@@ -1231,6 +1290,7 @@
                     loading_clients: 'Загрузка клиентов...',
                     loading_dashboard: 'Загрузка дашборда...',
                     loading_metrics: 'Загрузка метрик...',
+                    last_ip: 'Последний IP',
                 },
                 en: {
                     dashboard: '📊 Dashboard',
@@ -1360,6 +1420,7 @@
                     loading_clients: 'Loading clients...',
                     loading_dashboard: 'Loading dashboard...',
                     loading_metrics: 'Loading metrics...',
+                    last_ip: 'Last IP',
                 }
             },
 
@@ -2640,6 +2701,26 @@
                         this.metricsLoaded = true;
                     }, this.t('loading_metrics'));
                 }
+            },
+
+            async showIpHistory(clientId) {
+                await this.withGlobalLoading(async () => {
+                    try {
+                        const response = await fetch(`/api/clients/${clientId}/ip-history`, {
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.ipHistory = await response.json();
+                            const client = this.clients.find(c => c.id === clientId);
+                            this.selectedClientName = client?.name || 'Unknown';
+                            this.showIpHistoryModal = true;
+                        } else {
+                            this.error = 'Failed to load IP history';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to load IP history';
+                    }
+                }, 'Loading IP history...');
             },
         };
     }

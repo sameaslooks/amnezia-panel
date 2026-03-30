@@ -66,6 +66,19 @@ async def init_db():
                 FOREIGN KEY (client_id) REFERENCES clients(id)
             )
         ''')
+        # Таблица истории IP клиентов
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS client_ip_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                ip TEXT NOT NULL,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                count INTEGER DEFAULT 1,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                UNIQUE(client_id, ip)
+            )
+        ''')
         # Таблица серверов
         await db.execute('''
             CREATE TABLE IF NOT EXISTS servers (
@@ -84,6 +97,12 @@ async def init_db():
         ''')
         await db.commit()
         logger.debug("Database tables created/verified")
+
+        # Добавим колонку последнего IP-адреса клиента
+        cursor = await db.execute("PRAGMA table_info(clients)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if 'last_ip' not in columns:
+            await db.execute("ALTER TABLE clients ADD COLUMN last_ip TEXT")
 
         # Добавляем колонку статуса отключённости пользователя
         cursor = await db.execute("PRAGMA table_info(users)")
@@ -315,7 +334,8 @@ async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
 
 
 # ---------- Клиенты ----------
-async def update_traffic(public_key: str, received: int, sent: int, server_instance=None):
+async def update_traffic(public_key: str, received: int, sent: int, endpoint: Optional[str] = None, server_instance=None):
+    logger.info(f"update_traffic called for {public_key[:8]}..., endpoint={endpoint}")
     client = await get_client_by_public_key(public_key)
     if not client:
         return
@@ -324,52 +344,43 @@ async def update_traffic(public_key: str, received: int, sent: int, server_insta
     user_id = client['user_id']
 
     async with aiosqlite.connect(DB_PATH) as db:
-        # Получаем последние сохранённые значения
-        cursor = await db.execute(
-            'SELECT last_received, last_sent FROM clients WHERE id = ?',
-            (client_id,)
-        )
+        cursor = await db.execute('SELECT last_received, last_sent, last_ip FROM clients WHERE id = ?', (client_id,))
         row = await cursor.fetchone()
         if row:
-            last_received, last_sent = row
+            last_received, last_sent, last_ip = row
         else:
             last_received = last_sent = 0
+            last_ip = None
 
-        # Проверка на сброс счётчиков (перезапуск контейнера)
         if received < last_received or sent < last_sent:
-            # Просто обновляем последние значения, без записи в историю
-            await db.execute(
-                'UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
-                (received, sent, client_id)
-            )
+            await db.execute('UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
+                             (received, sent, client_id))
             await db.commit()
-            logger.debug(f"Counter reset for client {client_id}, updated last values")
             return
 
         delta_received = received - last_received
         delta_sent = sent - last_sent
 
         if delta_received > 0 or delta_sent > 0:
-            # Вставляем дельту в историю
-            await db.execute('''
-                INSERT INTO traffic_history (client_id, bytes_received, bytes_sent, total_bytes)
-                VALUES (?, ?, ?, ?)
-            ''', (client_id, delta_received, delta_sent, delta_received + delta_sent))
+            await db.execute('''INSERT INTO traffic_history (client_id, bytes_received, bytes_sent, total_bytes)
+                                VALUES (?, ?, ?, ?)''',
+                             (client_id, delta_received, delta_sent, delta_received + delta_sent))
+            await db.execute('UPDATE users SET traffic_used_bytes = traffic_used_bytes + ? WHERE id = ?',
+                             (delta_received + delta_sent, user_id))
 
-            # Обновляем суммарный трафик пользователя
-            await db.execute('''
-                UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?
-                WHERE id = ?
-            ''', (delta_received + delta_sent, user_id))
+        await db.execute('UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
+                         (received, sent, client_id))
 
-        # Всегда обновляем последние значения
-        await db.execute(
-            'UPDATE clients SET last_received = ?, last_sent = ? WHERE id = ?',
-            (received, sent, client_id)
-        )
+        logger.info(f"Checking last_ip: current={last_ip}, new={endpoint}")
+        if endpoint:
+            # Обновляем last_ip (на случай смены IP)
+            if endpoint != last_ip:
+                await db.execute('UPDATE clients SET last_ip = ? WHERE id = ?', (endpoint, client_id))
+            # Всегда обновляем историю (обновит last_seen и count)
+            await update_client_ip_history(client_id, endpoint)
+
         await db.commit()
 
-    # Проверка лимитов после обновления
     ok, reason = await check_user_limits(user_id)
     if not ok:
         logger.warning(f"User {user_id} limit exceeded: {reason}, deactivating all clients")
@@ -544,6 +555,7 @@ async def get_all_clients_with_user_info(include_deleted: bool = False) -> List[
                 c.is_active,
                 c.user_id,
                 c.created_at,
+                c.last_ip, 
                 u.username,
                 u.traffic_limit_bytes,
                 u.traffic_used_bytes,
@@ -558,6 +570,36 @@ async def get_all_clients_with_user_info(include_deleted: bool = False) -> List[
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+# ---------- Клиенты - GeoIP ----------
+async def get_client_ip_history(client_id: int) -> List[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('''
+            SELECT ip, first_seen, last_seen, count
+            FROM client_ip_history
+            WHERE client_id = ?
+            ORDER BY last_seen DESC
+        ''', (client_id,))
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    
+async def update_client_ip_history(client_id: int, ip: str):
+    """Обновляет историю IP для клиента."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            UPDATE client_ip_history
+            SET last_seen = CURRENT_TIMESTAMP,
+                count = count + 1
+            WHERE client_id = ? AND ip = ?
+        ''', (client_id, ip))
+        
+        if db.total_changes == 0:
+            await db.execute('''
+                INSERT INTO client_ip_history (client_id, ip)
+                VALUES (?, ?)
+            ''', (client_id, ip))
+        
+        await db.commit()
 
 # ---------- Серверы ----------
 async def get_server(server_id: int) -> Optional[Dict]:
