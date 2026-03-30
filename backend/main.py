@@ -15,6 +15,7 @@ import httpx
 
 from auth import authenticate_user, create_access_token, decode_token
 import database as db
+from database import init_pool, init_db
 from awg_manager import AmneziaWGServer
 from connection import LocalConnection, SSHConnection
 from logger import setup_logger, logger
@@ -29,7 +30,8 @@ from stats import get_dashboard_stats
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await db.init_db()
+    await init_pool(os.getenv("DATABASE_URL"))
+    await init_db()
     # Синхронизация маршрутов при старте для всех активных серверов
     servers = await db.get_all_servers_full()
     for srv in servers:
