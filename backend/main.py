@@ -283,7 +283,8 @@ async def get_limits(admin: dict = Depends(get_current_admin)):
             "expiry_date": c["expiry_date"],
             "is_active": c["is_active"],
             "server_id": c["server_id"],
-            "server_name": c["server_name"]
+            "server_name": c["server_name"],
+            "last_ip": c.get("last_ip")
         })
     return result
 
@@ -413,6 +414,12 @@ async def sync_routes(server: AmneziaWGServer = Depends(get_server)):
 async def generate_vpn_link(public_key: str, server: AmneziaWGServer = Depends(get_server)):
     link = await server.generate_amnezia_vpn_link(public_key)
     return {"link": link}
+
+
+@app.get("/api/clients/{client_id}/ip-history")
+async def get_client_ip_history(client_id: int, admin: dict = Depends(get_current_admin)):
+    history = await db.get_client_ip_history(client_id)
+    return history
 
 
 # ==================== USERS ENDPOINTS ====================
