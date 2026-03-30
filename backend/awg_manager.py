@@ -41,6 +41,13 @@ class AmneziaWGServer:
             logger.error("Failed to write config")
         return success
 
+    async def update_config(self, new_config: str) -> bool:
+        """Обновляет конфигурационный файл сервера и синхронизирует его."""
+        if not await self._write_config(new_config):
+            return False
+        await self._syncconf()
+        return True
+
     async def _syncconf(self):
         await self.conn.run_command("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         logger.debug("awg syncconf executed")

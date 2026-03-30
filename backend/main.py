@@ -760,6 +760,35 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
             pass
 
 
+@app.get("/api/servers/{server_id}/config")
+async def get_server_config(
+    server_id: int,
+    admin: dict = Depends(get_current_admin)
+):
+    async def get_config(server):
+        return await server._read_config()
+    config = await with_server(server_id, get_config)
+    return {"config": config}
+
+
+@app.post("/api/servers/{server_id}/config")
+async def update_server_config(
+    server_id: int,
+    request: Request,
+    admin: dict = Depends(get_current_admin)
+):
+    data = await request.json()
+    new_config = data.get("config")
+    if not new_config:
+        raise HTTPException(status_code=400, detail="Config not provided")
+    async def update(server):
+        success = await server.update_config(new_config)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update config")
+        return {"message": "Config updated"}
+    return await with_server(server_id, update)
+
+
 # ==================== PROMETHEUS ====================
 @app.get("/api/metrics/query")
 async def query_prometheus(query: str, admin: dict = Depends(get_current_admin)):

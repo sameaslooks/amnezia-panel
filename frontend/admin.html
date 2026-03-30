@@ -368,6 +368,10 @@
                                                         class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs">
                                                     Edit
                                                 </button>
+                                                <button @click="editServerConfig(server)"
+                                                        class="bg-purple-500 hover:bg-purple-600 text-white px-2 py-1 rounded text-xs">
+                                                    Config
+                                                </button>
                                                 <button @click="deleteServer(server.id, server.name)"
                                                         class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs"
                                                         :disabled="server.auth_type === 'local'">
@@ -439,6 +443,23 @@
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+
+                <!-- Edit Server Config Modal -->
+                <div x-show="showEditConfigModal"
+                    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    @click.self="closeEditConfigModal()">
+                    <div class="bg-white rounded-lg p-6 max-w-4xl w-full shadow-xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold">Edit Server Config</h3>
+                            <button @click="closeEditConfigModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        </div>
+                        <textarea x-model="editingServerConfig" rows="20" class="w-full px-3 py-2 border border-gray-300 rounded font-mono text-sm"></textarea>
+                        <div class="flex justify-end gap-2 mt-4">
+                            <button @click="closeEditConfigModal" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">Cancel</button>
+                            <button @click="saveServerConfig" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">Save</button>
+                        </div>
                     </div>
                 </div>
 
@@ -881,26 +902,23 @@
 
         <!-- Overlay (Config + QR) -->
         <div x-show="showConfigModal"
-             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-             @click.self="showConfigModal = false">
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            @click.self="closeClientConfigModal()">
             <div class="flex gap-6 justify-center items-start max-w-[90vw] w-full">
                 <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
-                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        <button @click="closeClientConfigModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                     </div>
                     <pre class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap break-words" x-text="selectedConfig"></pre>
                     <div class="flex justify-end mt-4">
-                        <button @click="downloadConfig"
-                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
-                            Download Config
-                        </button>
+                        <button @click="downloadConfig" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Download Config</button>
                     </div>
                 </div>
                 <div class="bg-white rounded-lg p-5 shadow-2xl flex-shrink-0 w-[clamp(220px,18vw,280px)] flex flex-col items-center">
                     <div class="flex justify-between items-center w-full mb-3">
                         <h3 class="text-sm font-semibold">AmneziaWG QR Code</h3>
-                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
+                        <button @click="closeClientConfigModal" class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
                     </div>
                     <canvas id="qrcode" class="bg-white p-2 rounded shadow" :width="qrSize" :height="qrSize"></canvas>
                     <div class="w-full mt-3" x-show="amneziaLink">
@@ -914,7 +932,6 @@
                 </div>
             </div>
         </div>
-    </div>
 
     <script>
     function adminPanel() {
@@ -943,6 +960,9 @@
             newServer: { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' },
             editingServer: { id: null, name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '', is_active: true },
             showEditServerModal: false,
+            showConfigModal: false,
+            editingConfig: '',
+            currentServerForConfig: null,
             savingServer: false,
             showEditModal: false,
             addingUser: false,
@@ -2054,6 +2074,69 @@
                 const hours = String(utcDate.getHours()).padStart(2, '0');
                 const minutes = String(utcDate.getMinutes()).padStart(2, '0');
                 return `${year}-${month}-${day}T${hours}:${minutes}`;
+            },
+
+            closeEditConfigModal() {
+                this.showEditConfigModal = false;
+                this.editingServerConfig = '';
+                this.editingConfigServerId = null;
+            },
+            closeClientConfigModal() {
+                this.showConfigModal = false;
+                this.selectedConfig = '';
+                this.selectedClientName = '';
+                this.amneziaLink = '';
+                // очищаем qr canvas при следующем открытии
+                setTimeout(() => {
+                    const canvas = document.getElementById('qrcode');
+                    if (canvas) canvas.innerHTML = '';
+                }, 0);
+            },
+
+            async editServerConfig(server) {
+                this.editingConfigServerId = server.id;
+                this.showEditConfigModal = true;
+                this.loading = true;
+                try {
+                    const response = await fetch(`/api/servers/${server.id}/config`, {
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.editingServerConfig = data.config;
+                    } else {
+                        this.error = 'Failed to load config';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to load config';
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            async saveServerConfig() {
+                this.saving = true;
+                try {
+                    const response = await fetch(`/api/servers/${this.editingConfigServerId}/config`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${this.getToken()}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ config: this.editingServerConfig })
+                    });
+                    if (response.ok) {
+                        this.success = 'Config updated successfully';
+                        this.showEditConfigModal = false;
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to update config';
+                    }
+                } catch (err) {
+                    this.error = 'Failed to update config';
+                } finally {
+                    this.saving = false;
+                }
             },
         };
     }
