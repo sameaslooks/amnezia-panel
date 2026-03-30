@@ -344,6 +344,8 @@ AllowedIPs = {next_ip}
                 endpoint = stat.get('endpoint')
                 transfer = stat.get('transfer', '')
                 received, sent = awg_utils.parse_transfer(transfer)
+                if endpoint and ':' in endpoint:
+                    endpoint = endpoint.split(':')[0]
                 logger.info(f"Collect stats: {stat['public_key'][:8]}... endpoint={stat.get('endpoint')}")
                 await database.update_traffic(pub_key, received, sent, endpoint, self)
 
