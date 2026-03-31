@@ -9,6 +9,17 @@
     <script src="/static/alpine.min.js" defer></script>
 </head>
 <body class="bg-gray-100">
+    <script>
+        const token = localStorage.getItem('token');
+        const role = localStorage.getItem('role');
+        if (token && role) {
+            if (role === 'admin') {
+                window.location.replace('/admin');
+            } else {
+                window.location.replace('/user');
+            }
+        }
+    </script>
     <div class="min-h-screen flex items-center justify-center" x-data="loginForm()">
         <div class="bg-white p-8 rounded-lg shadow-md w-96">
             <h1 class="text-2xl font-bold mb-6 text-center">Amnezia VPN Panel</h1>

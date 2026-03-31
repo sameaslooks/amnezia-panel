@@ -4,6 +4,7 @@ import json
 import struct
 import zlib
 import base64
+from logger import logger
 from typing import Dict, List, Optional
 
 
@@ -53,7 +54,8 @@ def parse_peers(config_text: str) -> List[Dict[str, str]]:
 
 
 def parse_traffic_output(output: str) -> List[Dict[str, str]]:
-    """Парсит вывод команды 'awg show' в список словарей с ключами и статистикой."""
+    """Парсит вывод команды 'awg show' в список словарей с ключами:
+    public_key, transfer, latest_handshake, endpoint (внешний IP клиента)."""
     traffic = []
     lines = output.split('\n')
     current_peer = None
@@ -64,13 +66,34 @@ def parse_traffic_output(output: str) -> List[Dict[str, str]]:
             traffic.append({
                 'public_key': current_peer,
                 'transfer': '',
-                'latest_handshake': 'Never'
+                'latest_handshake': 'Never',
+                'endpoint': ''
             })
+        elif 'endpoint:' in line and current_peer:
+            parts = line.split()
+            if len(parts) >= 2:
+                endpoint_full = parts[1]
+                ip = endpoint_full.split(':')[0]
+                traffic[-1]['endpoint'] = ip
         elif 'transfer:' in line and current_peer:
             traffic[-1]['transfer'] = line.split('transfer:')[1].strip()
         elif 'latest handshake:' in line and current_peer:
             traffic[-1]['latest_handshake'] = line.split('latest handshake:')[1].strip()
     return traffic
+
+
+def parse_transfer(transfer_str: str) -> tuple[int, int]:
+    """Принимает строку вида '123.45 MiB received, 456.78 MiB sent' 
+       возвращает (received_bytes, sent_bytes)."""
+    parts = transfer_str.split(',')
+    if len(parts) != 2:
+        return 0, 0
+    recv_part = parts[0].strip()
+    sent_part = parts[1].strip()
+    # убираем слова "received" и "sent"
+    recv_value = recv_part.replace('received', '').strip()
+    sent_value = sent_part.replace('sent', '').strip()
+    return parse_bytes(recv_value), parse_bytes(sent_value)
 
 
 def parse_bytes(size_str: str) -> int:
