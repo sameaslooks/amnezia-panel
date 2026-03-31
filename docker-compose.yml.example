@@ -21,7 +21,28 @@ services:
         - panel-network
     expose:
         - "8000"
-    
+
+# ----- Posgtres -----
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_USER: amnezia
+      POSTGRES_PASSWORD: YOUR-LONG-BIG-BOT_PASSWORD              # CHANGE THIS! 
+      POSTGRES_DB: apanel_db
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amnezia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - noxum-network
+# -------------------------------------------------------
+
 # ----- Nginx can be disabled and replaced with external proxy solution by commenting this block -----
   nginx:
     image: nginx:alpine
