@@ -1,7 +1,6 @@
 <h1 align="center">
   🚀 Amnezia VPN Panel
   <br>
-  <span style="font-size: 0.8em; color: #666;">Управление AmneziaWG с комфортом</span>
 </h1>
 
 <p align="center">
