@@ -41,6 +41,13 @@ class AmneziaWGServer:
             logger.error("Failed to write config")
         return success
 
+    async def update_config(self, new_config: str) -> bool:
+        """Обновляет конфигурационный файл сервера и синхронизирует его."""
+        if not await self._write_config(new_config):
+            return False
+        await self._syncconf()
+        return True
+
     async def _syncconf(self):
         await self.conn.run_command("awg syncconf awg0 <(cat /opt/amnezia/awg/awg0.conf)")
         logger.debug("awg syncconf executed")
@@ -300,6 +307,11 @@ AllowedIPs = {next_ip}
         traffic = awg_utils.parse_traffic_output(output)
         logger.debug(f"get_traffic returned {len(traffic)} entries")
         return traffic
+    
+    async def get_traffic_stats(self) -> List[Dict]:
+        """Возвращает полную статистику (трафик, handshake, endpoint)."""
+        output = await self.conn.run_command("awg show")
+        return awg_utils.parse_traffic_output(output)
 
     async def get_traffic_bytes(self) -> Dict[str, Dict]:
         traffic_list = await self.get_traffic()
@@ -324,18 +336,17 @@ AllowedIPs = {next_ip}
 
     async def collect_traffic_stats(self):
         async with _stats_collect_lock:
-            stats = await self.get_traffic_bytes()
+            stats = await self.get_traffic_stats()
             if not stats:
                 return
-            for pub_key, data in stats.items():
-                try:
-                    received = data["received"]
-                    sent = data["sent"]
-                    await database.update_traffic(pub_key, received, sent, self)
-                except Exception:
-                    logger.exception(
-                        f"Failed to collect traffic for {pub_key[:8]} on server {self.server_id}"
-                    )
+            for stat in stats:
+                pub_key = stat['public_key']
+                endpoint = stat.get('endpoint')
+                transfer = stat.get('transfer', '')
+                received, sent = awg_utils.parse_transfer(transfer)
+                if endpoint and ':' in endpoint:
+                    endpoint = endpoint.split(':')[0]
+                await database.update_traffic(pub_key, received, sent, endpoint, self)
 
     async def block_client(self, public_key: str) -> bool:
         ip = await self._get_client_ip(public_key)
@@ -356,9 +367,11 @@ AllowedIPs = {next_ip}
         return True
         
     async def sync_routes_with_db(self):
-        """Синхронизирует маршруты с полем is_active клиентов в БД для текущего сервера."""
         clients = await database.get_server_clients(self.server_id)
         for client in clients:
+            ip = await self._get_client_ip(client['public_key'])
+            if not ip:
+                continue
             if client['is_active']:
                 await self.unblock_client(client['public_key'])
             else:

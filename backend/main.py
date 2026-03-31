@@ -15,6 +15,7 @@ import httpx
 
 from auth import authenticate_user, create_access_token, decode_token
 import database as db
+from database import init_pool, init_db
 from awg_manager import AmneziaWGServer
 from connection import LocalConnection, SSHConnection
 from logger import setup_logger, logger
@@ -29,7 +30,8 @@ from stats import get_dashboard_stats
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await db.init_db()
+    await init_pool(os.getenv("DATABASE_URL"))
+    await init_db()
     # Синхронизация маршрутов при старте для всех активных серверов
     servers = await db.get_all_servers_full()
     for srv in servers:
@@ -283,7 +285,8 @@ async def get_limits(admin: dict = Depends(get_current_admin)):
             "expiry_date": c["expiry_date"],
             "is_active": c["is_active"],
             "server_id": c["server_id"],
-            "server_name": c["server_name"]
+            "server_name": c["server_name"],
+            "last_ip": c.get("last_ip")
         })
     return result
 
@@ -413,6 +416,12 @@ async def sync_routes(server: AmneziaWGServer = Depends(get_server)):
 async def generate_vpn_link(public_key: str, server: AmneziaWGServer = Depends(get_server)):
     link = await server.generate_amnezia_vpn_link(public_key)
     return {"link": link}
+
+
+@app.get("/api/clients/{client_id}/ip-history")
+async def get_client_ip_history(client_id: int, admin: dict = Depends(get_current_admin)):
+    history = await db.get_client_ip_history(client_id)
+    return history
 
 
 # ==================== USERS ENDPOINTS ====================
@@ -758,6 +767,35 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
             await websocket.close()
         except:
             pass
+
+
+@app.get("/api/servers/{server_id}/config")
+async def get_server_config(
+    server_id: int,
+    admin: dict = Depends(get_current_admin)
+):
+    async def get_config(server):
+        return await server._read_config()
+    config = await with_server(server_id, get_config)
+    return {"config": config}
+
+
+@app.post("/api/servers/{server_id}/config")
+async def update_server_config(
+    server_id: int,
+    request: Request,
+    admin: dict = Depends(get_current_admin)
+):
+    data = await request.json()
+    new_config = data.get("config")
+    if not new_config:
+        raise HTTPException(status_code=400, detail="Config not provided")
+    async def update(server):
+        success = await server.update_config(new_config)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update config")
+        return {"message": "Config updated"}
+    return await with_server(server_id, update)
 
 
 # ==================== PROMETHEUS ====================

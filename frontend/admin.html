@@ -17,38 +17,127 @@
         .animate-pulse {
             animation: pulse 1.5s ease-in-out infinite;
         }
+        /* Кастомная анимация загрузки */
+        @keyframes loader-rotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loader {
+            position: relative;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: loader-rotate 1s linear infinite;
+        }
+        .loader::after {
+            content: '';
+            box-sizing: border-box;
+            position: absolute;
+            inset: 0px;
+            border-radius: 50%;
+            border: 5px solid #3b82f6;
+            border-bottom-color: transparent;
+        }
+        /* Тёмная тема через CSS-переменные (работает без Tailwind dark) */
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f9fafb;
+            --text-primary: #1f2937;
+            --text-secondary: #4b5563;
+            --border-color: #e5e7eb;
+            --card-bg: #ffffff;
+        }
+        .dark {
+            --bg-primary: #111827;
+            --bg-secondary: #1f2937;
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --border-color: #374151;
+            --card-bg: #1f2937;
+        }
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .bg-white { background-color: var(--bg-primary) !important; }
+        .bg-gray-50 { background-color: var(--bg-secondary) !important; }
+        .text-gray-800 { color: var(--text-primary) !important; }
+        .text-gray-600 { color: var(--text-secondary) !important; }
+        .border-gray-200 { border-color: var(--border-color) !important; }
+        .bg-gray-100 { background-color: var(--bg-secondary) !important; }
+        .bg-gray-200 { background-color: var(--bg-secondary) !important; }
+        .dark .bg-gray-800 { background-color: #0f172a !important; }
+        .dark .bg-gray-900 { background-color: #0f172a !important; }
+        .dark .bg-gray-700 { background-color: #1e293b !important; }
+        .dark .border-gray-700 { border-color: #334155 !important; }
+        .dark .bg-gray-200 { background-color: #334155 !important; }
+        .dark .bg-gray-200:hover { background-color: #475569 !important; }
+        .dark .text-gray-700 { color: #e2e8f0 !important; }
+        /* Тёмная тема для карточек и плашек */
+        .dark .bg-red-100 { background-color: #7f1a1a; }    /* тёмно-красный фон */
+        .dark .bg-red-50 { background-color: #7f1a1a; }     /* единообразие */
+        .dark .bg-yellow-100 { background-color: #713f12; } /* тёмно-жёлтый фон */
+        .dark .bg-yellow-50 { background-color: #713f12; }
+        .dark .text-red-800 { color: #fecaca; }             /* светло-красный текст */
+        .dark .text-red-600 { color: #fca5a5; }
+        .dark .text-yellow-800 { color: #fed7aa; }          /* светло-жёлтый текст */
+        .dark .text-yellow-600 { color: #fcd34d; }
+        .dark input::placeholder,
+        .dark textarea::placeholder {
+            color: #9ca3af; /* серый цвет, видимый на тёмном фоне */
+        }
+        .dark input,
+        .dark textarea,
+        .dark select {
+            background-color: #374151; /* тёмный фон */
+            color: #f3f4f6; /* светлый текст */
+            border-color: #4b5563;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
-    <div class="min-h-screen flex" x-data="adminPanel()" x-init="init()">
+    <div class="h-screen flex overflow-hidden" x-data="adminPanel()" x-init="init()">
         <!-- Sidebar -->
-        <div class="w-64 bg-gray-800 text-white flex flex-col">
+        <div class="w-64 bg-gray-800 text-white flex flex-col overflow-y-auto">
             <div class="p-5 text-xl font-bold border-b border-gray-700">Amnezia VPN</div>
             <nav class="flex-1 mt-5">
                 <a href="#" @click.prevent="activeTab = 'dashboard'"
                    class="block px-5 py-3 hover:bg-gray-700 transition"
                    :class="{'bg-gray-900': activeTab === 'dashboard'}">
-                    📊 Dashboard
+                    <span x-text="t('dashboard')"></span>
                 </a>
                 <a href="#" @click.prevent="activeTab = 'servers'"
                    class="block px-5 py-3 hover:bg-gray-700 transition"
                    :class="{'bg-gray-900': activeTab === 'servers'}">
-                    🖥️ Servers
+                    <span x-text="t('servers')"></span>
                 </a>
                 <a href="#" @click.prevent="activeTab = 'clients'"
                    class="block px-5 py-3 hover:bg-gray-700 transition"
                    :class="{'bg-gray-900': activeTab === 'clients'}">
-                    📱 VPN Clients
+                    <span x-text="t('clients')"></span>
                 </a>
                 <a href="#" @click.prevent="activeTab = 'users'"
                    class="block px-5 py-3 hover:bg-gray-700 transition"
                    :class="{'bg-gray-900': activeTab === 'users'}">
-                    👥 Users
+                    <span x-text="t('users')"></span>
                 </a>
             </nav>
             <div class="p-5 border-t border-gray-700">
+                <div class="flex justify-between items-center mb-3">
+                    <button @click="toggleTheme" class="text-sm hover:bg-gray-700 px-2 py-1 rounded">
+                        <span x-show="theme === 'light'">🌙 <span x-text="t('dark_theme')"></span></span>
+                        <span x-show="theme === 'dark'">☀️ <span x-text="t('light_theme')"></span></span>
+                    </button>
+                    <select x-model="language" @change="setLanguage(language)" class="bg-gray-700 text-white text-sm rounded px-2 py-1">
+                        <option value="ru">🇷🇺 Русский</option>
+                        <option value="en">🇬🇧 English</option>
+                    </select>
+                </div>
                 <button @click="logout" class="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition">
-                    Logout
+                    <span x-text="t('logout')"></span>
                 </button>
             </div>
         </div>
@@ -70,60 +159,60 @@
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
-                                <p class="text-sm text-gray-500">Servers</p>
+                                <p class="text-sm text-gray-500" x-text="t('servers')"></p>
                                 <p class="text-2xl font-bold" x-text="dashboardStats.servers.total"></p>
                             </div>
                             <div class="text-blue-500 text-2xl">🖥️</div>
                         </div>
                         <div class="mt-2 text-xs text-gray-500">
-                            <span class="text-green-600" x-text="dashboardStats.servers.online + ' online'"></span>
+                            <span class="text-green-600" x-text="dashboardStats.servers.online + ' ' + t('online')"></span>
                             <span class="mx-1">•</span>
-                            <span class="text-yellow-600" x-text="dashboardStats.servers.issues + ' issues'"></span>
+                            <span class="text-yellow-600" x-text="dashboardStats.servers.issues + ' ' + t('issues_count')"></span>
                         </div>
                     </div>
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
-                                <p class="text-sm text-gray-500">Clients</p>
+                                <p class="text-sm text-gray-500" x-text="t('clients')"></p>
                                 <p class="text-2xl font-bold" x-text="dashboardStats.clients.total"></p>
                             </div>
                             <div class="text-green-500 text-2xl">📱</div>
                         </div>
                         <div class="mt-2 text-xs text-gray-500">
-                            <span class="text-green-600" x-text="dashboardStats.clients.active + ' active'"></span>
+                            <span class="text-green-600" x-text="dashboardStats.clients.active + ' ' + t('active_dashboard')"></span>
                             <span class="mx-1">•</span>
-                            <span class="text-red-600" x-text="dashboardStats.clients.blocked + ' blocked'"></span>
+                            <span class="text-red-600" x-text="dashboardStats.clients.blocked + ' ' + t('blocked_dashboard')"></span>
                         </div>
                     </div>
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
-                                <p class="text-sm text-gray-500">Total Traffic</p>
+                                <p class="text-sm text-gray-500" x-text="t('total_traffic')"></p>
                                 <p class="text-2xl font-bold" x-text="formatBytes(dashboardStats.traffic.total)"></p>
                             </div>
                             <div class="text-purple-500 text-2xl">📊</div>
                         </div>
                         <div class="mt-2 text-xs text-gray-500">
-                            <span x-text="'Today: ' + formatBytes(dashboardStats.traffic.today)"></span>
+                            <span x-text="t('today') + ': ' + formatBytes(dashboardStats.traffic.today)"></span>
                         </div>
                     </div>
                     <div class="bg-white rounded-lg shadow-md p-4">
                         <div class="flex items-center justify-between">
                             <div>
-                                <p class="text-sm text-gray-500">Active Now</p>
+                                <p class="text-sm text-gray-500" x-text="t('active_now')"></p>
                                 <p class="text-2xl font-bold" x-text="dashboardStats.active_now"></p>
                             </div>
                             <div class="text-green-500 text-2xl">⚡</div>
                         </div>
                         <div class="mt-2 text-xs text-gray-500">
-                            <span>Last 5 minutes</span>
+                            <span x-text="t('last_5_minutes')"></span>
                         </div>
                     </div>
                 </div>
 
                 <!-- График трафика -->
                 <div class="bg-white rounded-lg shadow-md p-4 mb-6">
-                    <h3 class="text-lg font-bold mb-4">Traffic (last 30 days)</h3>
+                    <h3 class="text-lg font-bold mb-4" x-text="t('traffic_last_30')"></h3>
                     <div class="h-48">
                         <canvas id="trafficChart" x-ref="trafficChart"></canvas>
                     </div>
@@ -132,7 +221,7 @@
                 <!-- Графики мониторинга -->
                 <div class="bg-white rounded-lg shadow-md p-4 mb-6">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-lg font-bold">📈 System Monitoring</h3>
+                        <h3 class="text-lg font-bold" x-text="t('system_monitoring')"></h3>
                         <div class="inline-flex rounded-md shadow-sm" role="group">
                             <template x-for="range in timeRanges" :key="range.value">
                                 <button type="button"
@@ -149,25 +238,25 @@
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="w-full">
-                            <h4 class="text-sm font-medium text-gray-600 mb-2">CPU Usage</h4>
+                            <h4 class="text-sm font-medium text-gray-600 mb-2" x-text="t('cpu_usage')"></h4>
                             <div class="h-48 w-full">
                                 <canvas id="cpuChart" class="w-full"></canvas>
                             </div>
                         </div>
                         <div class="w-full">
-                            <h4 class="text-sm font-medium text-gray-600 mb-2">Memory Usage</h4>
+                            <h4 class="text-sm font-medium text-gray-600 mb-2" x-text="t('memory_usage')"></h4>
                             <div class="h-48 w-full">
                                 <canvas id="memoryChart" class="w-full"></canvas>
                             </div>
                         </div>
                         <div class="w-full">
-                            <h4 class="text-sm font-medium text-gray-600 mb-2">Speedtest Download</h4>
+                            <h4 class="text-sm font-medium text-gray-600 mb-2" x-text="t('speedtest_download')"></h4>
                             <div class="h-48 w-full">
                                 <canvas id="speedtestDownloadChart" class="w-full"></canvas>
                             </div>
                         </div>
                         <div class="w-full">
-                            <h4 class="text-sm font-medium text-gray-600 mb-2">Speedtest Upload</h4>
+                            <h4 class="text-sm font-medium text-gray-600 mb-2" x-text="t('speedtest_upload')"></h4>
                             <div class="h-48 w-full">
                                 <canvas id="speedtestUploadChart" class="w-full"></canvas>
                             </div>
@@ -178,14 +267,14 @@
                 <!-- Нижние блоки -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                     <div class="bg-white rounded-lg shadow-md p-4">
-                        <h3 class="text-lg font-bold mb-4">Top 10 Users by Traffic</h3>
+                        <h3 class="text-lg font-bold mb-4" x-text="t('top_users_by_traffic')"></h3>
                         <div class="overflow-y-auto">
                             <table class="w-full text-sm">
                                 <thead>
                                     <tr class="text-left text-gray-500">
-                                        <th class="pb-2">User</th>
-                                        <th class="pb-2 text-right">Traffic</th>
-                                    </tr>
+                                        <th class="pb-2" x-text="t('user')"></th>
+                                        <th class="pb-2 text-right" x-text="t('traffic')"></th>
+                                     </tr>
                                 </thead>
                                 <tbody>
                                     <template x-for="user in dashboardStats.top_users" :key="user.user_id">
@@ -202,37 +291,33 @@
                     <div class="grid grid-cols-1 gap-6">
                         <div class="bg-white rounded-lg shadow-md p-4">
                             <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-                                <span>⚠️ Issues</span>
+                                <span>⚠️ <span x-text="t('issues')"></span></span>
                                 <span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded" x-text="dashboardStats.issues.length"></span>
                             </h3>
                             <div class="space-y-2 max-h-32 overflow-y-auto">
                                 <template x-for="issue in dashboardStats.issues" :key="issue.server_id">
                                     <div class="text-sm p-2 bg-red-50 rounded">
                                         <span class="font-medium" x-text="issue.server"></span>
-                                        <span class="text-red-600 text-xs block" x-text="issue.reason"></span>
+                                        <span class="text-red-600 text-xs block" x-text="issue.reason === 'Server is disabled' ? t('server_disabled') : issue.reason"></span>
                                     </div>
                                 </template>
-                                <div x-show="!dashboardStats.issues.length" class="text-sm text-gray-500">
-                                    No issues detected
-                                </div>
+                                <div x-show="!dashboardStats.issues.length" class="text-sm text-gray-500" x-text="t('no_issues')"></div>
                             </div>
                         </div>
                         
                         <div class="bg-white rounded-lg shadow-md p-4">
                             <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-                                <span>⏳ Expiring Soon</span>
+                                <span>⏳ <span x-text="t('expiring_soon')"></span></span>
                                 <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded" x-text="dashboardStats.expiring_soon.length"></span>
                             </h3>
                             <div class="space-y-2 max-h-32 overflow-y-auto">
                                 <template x-for="user in dashboardStats.expiring_soon" :key="user.id">
                                     <div class="text-sm p-2 bg-yellow-50 rounded">
                                         <span class="font-medium" x-text="user.username"></span>
-                                        <span class="text-yellow-600 text-xs block" x-text="'Expires: ' + formatLocalDate(user.expiry_date)"></span>
+                                        <span class="text-yellow-600 text-xs block" x-text="t('expires_label') + ' ' + formatLocalDate(user.expiry_date)"></span>
                                     </div>
                                 </template>
-                                <div x-show="!dashboardStats.expiring_soon.length" class="text-sm text-gray-500">
-                                    No expiring subscriptions
-                                </div>
+                                <div x-show="!dashboardStats.expiring_soon.length" class="text-sm text-gray-500" x-text="t('no_expiring')"></div>
                             </div>
                         </div>
                     </div>
@@ -244,142 +329,144 @@
                 <div class="flex justify-end mb-4">
                     <button @click="showAddServerModal = true"
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
-                        + Add Server
+                        + <span x-text="t('add_server')"></span>
                     </button>
                 </div>
 
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <div class="overflow-x-auto">
-                        <table class="w-full">
-                            <thead>
-                                <tr class="bg-gray-50">
-                                    <th class="px-4 py-2 text-left">Name</th>
-                                    <th class="px-4 py-2 text-left">Host</th>
-                                    <th class="px-4 py-2 text-left">Type</th>
-                                    <th class="px-4 py-2 text-left">Status</th>
-                                    <th class="px-4 py-2 text-left">Clients</th>
-                                    <th class="px-4 py-2 text-left">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template x-for="server in servers" :key="server.id">
-                                    <tr class="border-t">
-                                        <td class="px-4 py-2 font-medium" x-text="server.name"></td>
-                                        <td class="px-4 py-2" x-text="server.host || 'local'"></td>
-                                        <td class="px-4 py-2">
-                                            <span class="px-2 py-1 rounded text-xs"
-                                                :class="{
-                                                    'bg-green-100 text-green-800': server.auth_type === 'local',
-                                                    'bg-blue-100 text-blue-800': server.auth_type === 'password',
-                                                    'bg-purple-100 text-purple-800': server.auth_type === 'key',
-                                                    'bg-yellow-100 text-yellow-800': server.auth_type === 'key+sudo'
-                                                }"
-                                                x-text="server.auth_type"></span>
-                                        </td>
-                                        <td class="px-4 py-2">
-                                            <template x-if="!server.is_active">
-                                                <span class="text-gray-400 flex items-center gap-1">
-                                                    <span class="w-2 h-2 rounded-full bg-gray-400"></span>
-                                                    Disabled
-                                                </span>
-                                            </template>
-                                            <template x-if="server.is_active && server.id === 1">
-                                                <span class="text-green-600 flex items-center gap-1 group relative cursor-help">
-                                                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                                                    Not Available
-                                                    <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                                                        Local server (always available)
-                                                        <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
-                                                    </div>
-                                                </span>
-                                            </template>
-                                            <template x-if="server.is_active && server.id !== 1">
-                                                <div class="flex items-center gap-1">
-                                                    <template x-if="!server.status">
-                                                        <span class="text-gray-400 flex items-center gap-1">
-                                                            <span class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></span>
-                                                            <span>Checking...</span>
-                                                        </span>
-                                                    </template>
-                                                    <template x-if="server.status">
-                                                        <div class="relative group flex items-center">
-                                                            <template x-if="!server.status.online">
-                                                                <span class="text-gray-400 flex items-center gap-1 cursor-help">
-                                                                    <span class="w-2 h-2 rounded-full bg-gray-400"></span>
-                                                                    Offline
-                                                                </span>
-                                                            </template>
-                                                            <template x-if="server.status.online && !server.status.container_running">
-                                                                <span class="text-yellow-600 flex items-center gap-1 cursor-help">
-                                                                    <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
-                                                                    Online
-                                                                </span>
-                                                            </template>
-                                                            <template x-if="server.status.online && server.status.container_running">
-                                                                <span class="text-green-600 flex items-center gap-1 cursor-help">
-                                                                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                                                                    Working
-                                                                </span>
-                                                            </template>
-                                                            <div x-show="server.status.version"
-                                                                class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                                                                <span x-text="'Version: ' + server.status.version"></span>
-                                                                <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
-                                                            </div>
-                                                        </div>
-                                                    </template>
+                <div class="bg-white rounded-lg shadow-md p-6 overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left" x-text="t('name')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('host')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('type')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('status')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('clients')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('actions')"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="server in servers" :key="server.id">
+                                <tr class="border-t">
+                                    <td class="px-4 py-2 font-medium" x-text="server.name"></td>
+                                    <td class="px-4 py-2" x-text="server.host || 'local'"></td>
+                                    <td class="px-4 py-2">
+                                        <span class="px-2 py-1 rounded text-xs"
+                                            :class="{
+                                                'bg-green-100 text-green-800': server.auth_type === 'local',
+                                                'bg-blue-100 text-blue-800': server.auth_type === 'password',
+                                                'bg-purple-100 text-purple-800': server.auth_type === 'key',
+                                                'bg-yellow-100 text-yellow-800': server.auth_type === 'key+sudo'
+                                            }"
+                                            x-text="server.auth_type"></span>
+                                    </td>
+                                    <td class="px-4 py-2">
+                                        <template x-if="!server.is_active">
+                                            <span class="text-gray-400 flex items-center gap-1">
+                                                <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                                                <span x-text="t('disabled')"></span>
+                                            </span>
+                                        </template>
+                                        <template x-if="server.is_active && server.id === 1">
+                                            <span class="text-green-600 flex items-center gap-1 group relative cursor-help">
+                                                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                                                <span x-text="t('not_available')"></span>
+                                                <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+                                                    <span x-text="t('local_server_info')"></span>
+                                                    <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
                                                 </div>
-                                            </template>
-                                        </td>
-                                        <td class="px-4 py-2" x-text="server.status?.clients_count || 0"></td>
-                                        <td class="px-4 py-2">
-                                            <div class="flex flex-wrap gap-1">
-                                                <button type="button"
-                                                        @click.prevent="testServer(server.id)"
-                                                        class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs"
-                                                        :disabled="server.testing">
-                                                    <span x-show="!server.testing">Test</span>
-                                                    <span x-show="server.testing">...</span>
-                                                </button>
-                                                <button @click="setupServerWithConfirm(server)"
-                                                        class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs"
-                                                        x-show="server.auth_type !== 'local' && server.status && server.is_active && (!server.status.online || !server.status.container_running)">
-                                                    Setup
-                                                </button>
-                                                <button @click="startServerContainer(server)"
-                                                        class="bg-green-700 hover:bg-green-800 text-white px-2 py-1 rounded text-xs"
-                                                        x-show="server.is_active && server.status?.online && !server.status?.container_running"
-                                                        title="Start container">
-                                                    Start
-                                                </button>
-                                                <button @click="stopServerContainer(server)"
-                                                        class="bg-red-700 hover:bg-red-800 text-white px-2 py-1 rounded text-xs"
-                                                        x-show="server.is_active && server.status?.container_running"
-                                                        title="Stop container">
-                                                    Stop
-                                                </button>
-                                                <button @click="toggleServer(server)"
-                                                        class="text-white px-2 py-1 rounded text-xs font-medium"
-                                                        :class="server.is_active ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
-                                                        :title="server.is_active ? 'Disable server in panel' : 'Enable server in panel'">
-                                                    <span x-text="server.is_active ? 'Disable' : 'Enable'"></span>
-                                                </button>
-                                                <button @click="openEditServerModal(server)"
-                                                        class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs">
-                                                    Edit
-                                                </button>
-                                                <button @click="deleteServer(server.id, server.name)"
-                                                        class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs"
-                                                        :disabled="server.auth_type === 'local'">
-                                                    Delete
-                                                </button>
+                                            </span>
+                                        </template>
+                                        <template x-if="server.is_active && server.id !== 1">
+                                            <div class="flex items-center gap-1">
+                                                <template x-if="!server.status">
+                                                    <span class="text-gray-400 flex items-center gap-1">
+                                                        <span class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></span>
+                                                        <span x-text="t('checking')"></span>
+                                                    </span>
+                                                </template>
+                                                <template x-if="server.status">
+                                                    <div class="relative group flex items-center">
+                                                        <template x-if="!server.status.online">
+                                                            <span class="text-gray-400 flex items-center gap-1 cursor-help">
+                                                                <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                                                                <span x-text="t('offline')"></span>
+                                                            </span>
+                                                        </template>
+                                                        <template x-if="server.status.online && !server.status.container_running">
+                                                            <span class="text-yellow-600 flex items-center gap-1 cursor-help">
+                                                                <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                                                                <span x-text="t('online')"></span>
+                                                            </span>
+                                                        </template>
+                                                        <template x-if="server.status.online && server.status.container_running">
+                                                            <span class="text-green-600 flex items-center gap-1 cursor-help">
+                                                                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                                                                <span x-text="t('working')"></span>
+                                                            </span>
+                                                        </template>
+                                                        <div x-show="server.status.version"
+                                                            class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+                                                            <span x-text="'Version: ' + server.status.version"></span>
+                                                            <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                                                        </div>
+                                                    </div>
+                                                </template>
                                             </div>
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
+                                        </template>
+                                    </td>
+                                    <td class="px-4 py-2" x-text="server.status?.clients_count || 0"></td>
+                                    <td class="px-4 py-2">
+                                        <div class="flex flex-wrap gap-1">
+                                            <button type="button"
+                                                    @click.prevent="testServer(server.id)"
+                                                    class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs"
+                                                    :disabled="server.testing">
+                                                <span x-show="!server.testing" x-text="t('test')"></span>
+                                                <span x-show="server.testing">...</span>
+                                            </button>
+                                            <button @click="setupServerWithConfirm(server)"
+                                                    class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs"
+                                                    x-show="server.auth_type !== 'local' && server.status && server.is_active && (!server.status.online || !server.status.container_running)">
+                                                <span x-text="t('setup')"></span>
+                                            </button>
+                                            <button @click="startServerContainer(server)"
+                                                    class="bg-green-700 hover:bg-green-800 text-white px-2 py-1 rounded text-xs"
+                                                    x-show="server.is_active && server.status?.online && !server.status?.container_running"
+                                                    :title="t('start_container')">
+                                                <span x-text="t('start')"></span>
+                                            </button>
+                                            <button @click="stopServerContainer(server)"
+                                                    class="bg-red-700 hover:bg-red-800 text-white px-2 py-1 rounded text-xs"
+                                                    x-show="server.is_active && server.status?.container_running"
+                                                    :title="t('stop_container')">
+                                                <span x-text="t('stop')"></span>
+                                            </button>
+                                            <button @click="toggleServer(server)"
+                                                    class="text-white px-2 py-1 rounded text-xs font-medium"
+                                                    :class="server.is_active ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
+                                                    :title="server.is_active ? t('disable_server') : t('enable_server')">
+                                                <span x-text="server.is_active ? t('disable') : t('enable')"></span>
+                                            </button>
+                                            <button @click="openEditServerModal(server)"
+                                                    class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs">
+                                                <span x-text="t('edit')"></span>
+                                            </button>
+                                            <button @click="editServerConfig(server)"
+                                                    class="bg-purple-500 hover:bg-purple-600 text-white px-2 py-1 rounded text-xs">
+                                                <span x-text="t('config')"></span>
+                                            </button>
+                                            <button @click="deleteServer(server.id, server.name)"
+                                                    class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs"
+                                                    :disabled="server.auth_type === 'local'">
+                                                <span x-text="t('delete')"></span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
 
                 <!-- Edit Server Modal -->
@@ -388,57 +475,78 @@
                      @click.self="showEditServerModal = false">
                     <div class="bg-white rounded-lg p-6 max-w-2xl w-full shadow-xl">
                         <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg font-bold">Edit Server</h3>
+                            <h3 class="text-lg font-bold" x-text="t('edit_server')"></h3>
                             <button @click="showEditServerModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                         </div>
                         <form @submit.prevent="updateServer">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                                 <input type="text" x-model="editingServer.name"
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                    placeholder="Server name" required>
+                                    :placeholder="t('server_name')" required>
                                 <input type="text" x-model="editingServer.host"
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                    placeholder="Host (IP or domain)">
+                                    :placeholder="t('host')">
                                 <input type="text" x-model="editingServer.username"
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                    placeholder="Username (for SSH)">
+                                    :placeholder="t('username')">
                                 <input type="text" x-model="editingServer.port"
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                    placeholder="SSH port (default 22)">
+                                    :placeholder="t('ssh_port')">
                                 <select x-model="editingServer.auth_type"
                                         class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
-                                    <option value="local">Local (this server)</option>
-                                    <option value="password">Password auth</option>
-                                    <option value="key">Key auth</option>
-                                    <option value="key+sudo">Key + sudo password</option>
+                                    <option value="local" x-text="t('local')"></option>
+                                    <option value="password" x-text="t('password')"></option>
+                                    <option value="key" x-text="t('key')"></option>
+                                    <option value="key+sudo" x-text="t('key_sudo')"></option>
                                 </select>
                                 <input type="password" x-model="editingServer.password"
                                     class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                    placeholder="Password (if needed)">
+                                    :placeholder="t('password_if_needed')">
                             </div>
                             <div class="mb-4" x-show="editingServer.auth_type.includes('key')">
                                 <textarea x-model="editingServer.private_key"
                                         class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500 font-mono text-sm"
                                         rows="4"
-                                        placeholder="Paste private key here (including BEGIN and END lines)"></textarea>
+                                        :placeholder="t('private_key')"></textarea>
                             </div>
                             <div class="flex items-center mb-4">
                                 <input type="checkbox" x-model="editingServer.is_active" id="edit_server_active" class="mr-2">
-                                <label for="edit_server_active" class="text-sm text-gray-700">Server is active</label>
+                                <label for="edit_server_active" class="text-sm text-gray-700" x-text="t('server_active')"></label>
                             </div>
                             <div class="flex justify-end gap-2">
                                 <button type="button" @click="showEditServerModal = false"
                                         class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
-                                    Cancel
+                                    <span x-text="t('cancel')"></span>
                                 </button>
                                 <button type="submit"
                                         class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
                                         :disabled="savingServer">
-                                    <span x-show="!savingServer">Save Changes</span>
-                                    <span x-show="savingServer">Saving...</span>
+                                    <span x-show="!savingServer" x-text="t('save_changes')"></span>
+                                    <span x-show="savingServer" x-text="t('saving')"></span>
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+
+                <!-- Edit Server Config Modal -->
+                <div x-show="showEditConfigModal"
+                    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    @click.self="closeEditConfigModal()">
+                    <div class="bg-white rounded-lg p-6 max-w-4xl w-full shadow-xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold" x-text="t('edit_server_config')"></h3>
+                            <button @click="closeEditConfigModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        </div>
+                        <textarea x-model="editingServerConfig" rows="20" class="w-full px-3 py-2 border border-gray-300 rounded font-mono text-sm"></textarea>
+                        <div class="flex justify-end gap-2 mt-4">
+                            <button @click="closeEditConfigModal" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
+                                <span x-text="t('cancel')"></span>
+                            </button>
+                            <button @click="saveServerConfig" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                                <span x-text="t('save')"></span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -446,7 +554,7 @@
                 <div x-show="showSetupModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                         <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg font-bold">Server Setup Log</h3>
+                            <h3 class="text-lg font-bold" x-text="t('server_setup_log')"></h3>
                             <button @click="closeSetupModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                         </div>
                         <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-sm h-96 overflow-y-auto">
@@ -466,9 +574,8 @@
                             </template>
                         </div>
                         <div class="flex justify-end mt-4">
-                            <button @click="closeSetupModal"
-                                    class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
-                                Close
+                            <button @click="closeSetupModal" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                                <span x-text="t('close')"></span>
                             </button>
                         </div>
                     </div>
@@ -482,16 +589,16 @@
                         <button @click="syncClients"
                                 class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm flex items-center gap-1"
                                 :disabled="syncing">
-                            <span x-show="!syncing">⟲ Sync</span>
-                            <span x-show="syncing">⟳ Syncing...</span>
+                            <span x-show="!syncing">⟲ <span x-text="t('sync')"></span></span>
+                            <span x-show="syncing">⟳ <span x-text="t('syncing')"></span></span>
                         </button>
                         <button @click="showAddClientModal = true"
                                 class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-1">
-                            + Add client
+                            + <span x-text="t('add_client')"></span>
                         </button>
                         <label class="flex items-center gap-2 text-sm text-gray-700">
                             <input type="checkbox" x-model="showDisabledUsers" class="rounded border-gray-300">
-                            <span>Show disabled accounts</span>
+                            <span x-text="t('show_disabled_accounts')"></span>
                         </label>
                     </div>
                 </div>
@@ -501,28 +608,29 @@
                         <div class="bg-white rounded-lg shadow-md overflow-hidden" :class="{'bg-red-50': group.is_disabled}">
                             <div class="bg-gray-50 px-6 py-4 border-b flex flex-wrap items-center justify-between gap-4">
                                 <div>
-                                    <span class="font-bold text-lg" x-text="group.username || 'Unknown user'"></span>
+                                    <span class="font-bold text-lg" x-text="group.username || t('unknown_user')"></span>
                                     <span class="ml-2 text-sm text-gray-600" x-text="'Role: ' + (group.role || 'user')"></span>
-                                    <span x-show="group.is_disabled" class="ml-2 text-xs text-red-600 font-semibold">(Account disabled)</span>
+                                    <span x-show="group.is_disabled" class="ml-2 text-xs text-red-600 font-semibold" x-text="t('account_disabled')"></span>
                                 </div>
                                 <div class="flex gap-4 text-sm items-center">
-                                    <span><span class="font-medium">Limit:</span> <span x-text="group.limit ? formatBytes(group.limit) : 'No limit'"></span></span>
-                                    <span><span class="font-medium">Used:</span> <span x-text="formatBytes(group.used)"></span></span>
-                                    <span><span class="font-medium">Expires:</span> <span x-text="group.expiry_date ? formatLocalDate(group.expiry_date) : 'Never'"></span></span>
-                                    <button @click="editUserLimits(group)" class="text-blue-500 hover:text-blue-700 text-sm" title="Edit user limits">✎</button>
+                                    <span><span class="font-medium" x-text="t('limit') + ':'"></span> <span x-text="group.limit ? formatBytes(group.limit) : t('no_limit')"></span></span>
+                                    <span><span class="font-medium" x-text="t('used') + ':'"></span> <span x-text="formatBytes(group.used)"></span></span>
+                                    <span><span class="font-medium" x-text="t('expires') + ':'"></span> <span x-text="group.expiry_date ? formatLocalDate(group.expiry_date) : t('never')"></span></span>
+                                    <button @click="editUserLimits(group)" class="text-blue-500 hover:text-blue-700 text-sm" :title="t('edit_user_limits')">✎</button>
                                 </div>
                             </div>
                             <div class="overflow-x-auto">
                                 <table class="w-full">
                                     <thead class="bg-gray-100">
                                         <tr>
-                                            <th class="px-4 py-2 text-left">Server</th>
-                                            <th class="px-4 py-2 text-left">Name</th>
-                                            <th class="px-4 py-2 text-left">IP</th>
-                                            <th class="px-4 py-2 text-left">Traffic</th>
-                                            <th class="px-4 py-2 text-left">Handshake</th>
-                                            <th class="px-4 py-2 text-left">Status</th>
-                                            <th class="px-4 py-2 text-left">Actions</th>
+                                            <th class="px-4 py-2 text-left" x-text="t('server')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('name')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('ip')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('traffic')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('handshake')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('last_ip')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('status')"></th>
+                                            <th class="px-4 py-2 text-left" x-text="t('actions')"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -535,19 +643,27 @@
                                                 <td class="px-4 py-2" x-text="client.name"></td>
                                                 <td class="px-4 py-2 font-mono text-sm" x-text="client.ip"></td>
                                                 <td class="px-4 py-2" x-text="client.traffic || '0 B'"></td>
-                                                <td class="px-4 py-2 text-sm" x-text="client.handshake || 'Never'"></td>
+                                                <td class="px-4 py-2 text-sm" x-text="client.handshake || t('never')"></td>
+                                                <td class="px-4 py-2 font-mono text-sm">
+                                                    <span x-text="client.last_ip || '—'"></span>
+                                                    <button @click="showIpHistory(client.id)" 
+                                                            class="ml-1 text-blue-500 hover:text-blue-700 text-xs" 
+                                                            title="История IP">
+                                                        📋
+                                                    </button>
+                                                </td>
                                                 <td class="px-4 py-2">
-                                                    <span x-show="client.is_active" class="text-green-600 font-medium">● Active</span>
-                                                    <span x-show="!client.is_active" class="text-red-600 font-medium">● Blocked</span>
+                                                    <span x-show="client.is_active" class="text-green-600 font-medium" x-text="t('active')"></span>
+                                                    <span x-show="!client.is_active" class="text-red-600 font-medium" x-text="t('blocked')"></span>
                                                 </td>
                                                 <td class="px-4 py-2">
                                                     <button @click="showConfig(client)"
                                                             class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 mr-1">
-                                                        Config
+                                                        <span x-text="t('config')"></span>
                                                     </button>
                                                     <button @click="deleteClient(client.public_key, client.name)"
                                                             class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600">
-                                                        Delete
+                                                        <span x-text="t('delete')"></span>
                                                     </button>
                                                 </td>
                                             </tr>
@@ -557,9 +673,7 @@
                             </div>
                         </div>
                     </template>
-                    <div x-show="!clients.length" class="bg-white rounded-lg shadow-md p-6 text-center text-gray-500">
-                        No clients found. Use "Sync from servers" or add a new client.
-                    </div>
+                    <div x-show="!clients.length" class="bg-white rounded-lg shadow-md p-6 text-center text-gray-500" x-text="t('no_clients')"></div>
                 </div>
             </div>
 
@@ -568,67 +682,64 @@
                 <div class="flex justify-end mb-4">
                     <button @click="showAddUserModal = true"
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
-                        + Add User
+                        + <span x-text="t('add_user')"></span>
                     </button>
                 </div>
 
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <div class="overflow-x-auto">
-                        <table class="w-full">
-                            <thead>
-                                <tr class="bg-gray-50">
-                                    <th class="px-4 py-2 text-left">Username</th>
-                                    <th class="px-4 py-2 text-left">Role</th>
-                                    <th class="px-4 py-2 text-left">Limit</th>
-                                    <th class="px-4 py-2 text-left">Used</th>
-                                    <th class="px-4 py-2 text-left">Expiry</th>
-                                    <th class="px-r py-2 text-left">Config Limit</th>
-                                    <th class="px-4 py-2 text-left">Status</th>
-                                    <th class="px-4 py-2 text-left">Created</th>
-                                    <th class="px-4 py-2 text-left">Actions</th>
+                <div class="bg-white rounded-lg shadow-md p-6 overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left" x-text="t('username')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('role')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('limit')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('used')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('expires')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('config_limit')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('status')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('created')"></th>
+                                <th class="px-4 py-2 text-left" x-text="t('actions')"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="user in users" :key="user.id">
+                                <tr class="border-t">
+                                    <td class="px-4 py-2" x-text="user.username"></td>
+                                    <td class="px-4 py-2">
+                                        <span class="px-2 py-1 rounded text-sm"
+                                            :class="user.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'"
+                                            x-text="t(user.role)"></span>
+                                    </td>
+                                    <td class="px-4 py-2" x-text="user.traffic_limit_bytes ? formatBytes(user.traffic_limit_bytes) : t('no_limit')"></td>
+                                    <td class="px-4 py-2" x-text="formatBytes(user.traffic_used_bytes || 0)"></td>
+                                    <td class="px-4 py-2" x-text="formatLocalDate(user.expiry_date)"></td>
+                                    <td class="px-4 py-2">
+                                        <template x-if="user.role === 'admin'">
+                                            <span class="text-gray-500" x-text="t('unlimited')"></span>
+                                        </template>
+                                        <template x-if="user.role !== 'admin'">
+                                            <span x-text="user.config_limit || '1'"></span>
+                                        </template>
+                                    </td>
+                                    <td class="px-4 py-2">
+                                        <span x-show="!user.is_disabled" class="text-green-600" x-text="t('active')"></span>
+                                        <span x-show="user.is_disabled" class="text-red-600" x-text="t('disabled')"></span>
+                                    </td>
+                                    <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(user.created_at).toLocaleDateString()"></td>
+                                    <td class="px-4 py-2">
+                                        <button @click="editUserLimitsFromUser(user)" class="text-blue-500 hover:text-blue-700 mr-2" :title="t('edit_limits')">✎</button>
+                                        <button @click="editUser(user)" class="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 mr-2"><span x-text="t('edit')"></span></button>
+                                        <button @click="toggleUserStatus(user)"
+                                                class="text-white px-3 py-1 rounded text-sm"
+                                                :class="user.is_disabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
+                                            <span x-text="user.is_disabled ? t('enable') : t('disable')"></span>
+                                        </button>
+                                        <button @click="deleteUserConfirm(user)" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600" :disabled="user.username === currentUser"><span x-text="t('delete')"></span></button>
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                <template x-for="user in users" :key="user.id">
-                                    <tr class="border-t">
-                                        <td class="px-4 py-2" x-text="user.username"></td>
-                                        <td class="px-4 py-2">
-                                            <span class="px-2 py-1 rounded text-sm"
-                                                :class="user.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'"
-                                                x-text="user.role"></span>
-                                        </td>
-                                        <td class="px-4 py-2" x-text="user.traffic_limit_bytes ? formatBytes(user.traffic_limit_bytes) : 'No limit'"></td>
-                                        <td class="px-4 py-2" x-text="formatBytes(user.traffic_used_bytes || 0)"></td>
-                                        <td class="px-4 py-2" x-text="formatLocalDate(user.expiry_date)"></td>
-                                        <td class="px-4 py-2">
-                                            <template x-if="user.role === 'admin'">
-                                                <span class="text-gray-500">Unlimited</span>
-                                            </template>
-                                            <template x-if="user.role !== 'admin'">
-                                                <span x-text="user.config_limit || '1'"></span>
-                                            </template>
-                                        </td>
-                                        <td class="px-4 py-2">
-                                            <span x-show="!user.is_disabled" class="text-green-600">● Active</span>
-                                            <span x-show="user.is_disabled" class="text-red-600">● Disabled</span>
-                                        </td>
-
-                                        <td class="px-4 py-2 text-sm text-gray-600" x-text="new Date(user.created_at).toLocaleDateString()"></td>
-                                        <td class="px-4 py-2">
-                                            <button @click="editUserLimitsFromUser(user)" class="text-blue-500 hover:text-blue-700 mr-2" title="Edit limits">✎</button>
-                                            <button @click="editUser(user)" class="bg-yellow-500 text-white px-3 py-1 rounded text-sm hover:bg-yellow-600 mr-2">Edit</button>
-                                            <button @click="toggleUserStatus(user)"
-                                                    class="text-white px-3 py-1 rounded text-sm"
-                                                    :class="user.is_disabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
-                                                <span x-text="user.is_disabled ? 'Enable' : 'Disable'"></span>
-                                            </button>
-                                            <button @click="deleteUserConfirm(user)" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600" :disabled="user.username === currentUser">Delete</button>
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -639,19 +750,19 @@
              @click.self="showAddClientModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold">Add New Client</h3>
+                    <h3 class="text-lg font-bold" x-text="t('add_new_client')"></h3>
                     <button @click="showAddClientModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
                 <form @submit.prevent="addClientModal">
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-sm font-medium mb-1">Client Name</label>
+                            <label class="block text-sm font-medium mb-1" x-text="t('client_name')"></label>
                             <input type="text" x-model="newClientName"
                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                   placeholder="e.g. iPhone 15" required>
+                                   :placeholder="t('client_name_placeholder')" required>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium mb-1">Server</label>
+                            <label class="block text-sm font-medium mb-1" x-text="t('server')"></label>
                             <select x-model="selectedServerId"
                                     class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                                 <template x-for="server in servers" :key="server.id">
@@ -660,10 +771,10 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium mb-1">User</label>
+                            <label class="block text-sm font-medium mb-1" x-text="t('user')"></label>
                             <select x-model="selectedUserId"
                                     class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
-                                <option value="">Select user</option>
+                                <option value="" x-text="t('select_user')"></option>
                                 <template x-for="user in users" :key="user.id">
                                     <option :value="user.id" x-text="user.username"></option>
                                 </template>
@@ -672,13 +783,13 @@
                         <div class="flex justify-end gap-2 mt-4">
                             <button type="button" @click="showAddClientModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
-                                Cancel
+                                <span x-text="t('cancel')"></span>
                             </button>
                             <button type="submit"
                                     class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
                                     :disabled="adding">
-                                <span x-show="!adding">Add</span>
-                                <span x-show="adding">Adding...</span>
+                                <span x-show="!adding" x-text="t('add')"></span>
+                                <span x-show="adding" x-text="t('adding')"></span>
                             </button>
                         </div>
                     </div>
@@ -692,50 +803,50 @@
              @click.self="showAddServerModal = false">
             <div class="bg-white rounded-lg p-6 max-w-2xl w-full shadow-xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold">Add New Server</h3>
+                    <h3 class="text-lg font-bold" x-text="t('add_new_server')"></h3>
                     <button @click="showAddServerModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
                 <form @submit.prevent="addServer">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <input type="text" x-model="newServer.name"
                             class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="Server name" required>
+                            :placeholder="t('server_name')" required>
                         <input type="text" x-model="newServer.host"
                             class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="Host (IP or domain)">
+                            :placeholder="t('host')">
                         <input type="text" x-model="newServer.username"
                             class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="Username (for SSH)">
+                            :placeholder="t('username')">
                         <input type="text" x-model="newServer.port"
                             class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="SSH port (default 22)">
+                            :placeholder="t('ssh_port')">
                         <select x-model="newServer.auth_type"
                                 class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
-                            <option value="local">Local (this server)</option>
-                            <option value="password">Password auth</option>
-                            <option value="key">Key auth</option>
-                            <option value="key+sudo">Key + sudo password</option>
+                            <option value="local" x-text="t('local')"></option>
+                            <option value="password" x-text="t('password')"></option>
+                            <option value="key" x-text="t('key')"></option>
+                            <option value="key+sudo" x-text="t('key_sudo')"></option>
                         </select>
                         <input type="password" x-model="newServer.password"
                             class="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="Password (if needed)">
+                            :placeholder="t('password_if_needed')">
                     </div>
                     <div class="mb-4" x-show="newServer.auth_type.includes('key')">
                         <textarea x-model="newServer.private_key"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500 font-mono text-sm"
                                 rows="4"
-                                placeholder="Paste private key here (including BEGIN and END lines)"></textarea>
+                                :placeholder="t('private_key')"></textarea>
                     </div>
                     <div class="flex justify-end gap-2">
                         <button type="button" @click="showAddServerModal = false"
                                 class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
-                            Cancel
+                            <span x-text="t('cancel')"></span>
                         </button>
                         <button type="submit"
                                 class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
                                 :disabled="addingServer">
-                            <span x-show="!addingServer">Add Server</span>
-                            <span x-show="addingServer">Adding...</span>
+                            <span x-show="!addingServer" x-text="t('add_server')"></span>
+                            <span x-show="addingServer" x-text="t('adding')"></span>
                         </button>
                     </div>
                 </form>
@@ -748,32 +859,32 @@
              @click.self="showAddUserModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold">Add New User</h3>
+                    <h3 class="text-lg font-bold" x-text="t('add_new_user')"></h3>
                     <button @click="showAddUserModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
                 <form @submit.prevent="addUser">
                     <div class="space-y-4">
                         <input type="text" x-model="newUser.username"
                                class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                               placeholder="Username" required>
+                               :placeholder="t('username')" required>
                         <input type="password" x-model="newUser.password"
                                class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                               placeholder="Password" required>
+                               :placeholder="t('password')" required>
                         <select x-model="newUser.role"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
+                            <option value="user" x-text="t('user')"></option>
+                            <option value="admin" x-text="t('admin')"></option>
                         </select>
                         <div class="flex justify-end gap-2">
                             <button type="button" @click="showAddUserModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
-                                Cancel
+                                <span x-text="t('cancel')"></span>
                             </button>
                             <button type="submit"
                                     class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
                                     :disabled="addingUser">
-                                <span x-show="!addingUser">Add User</span>
-                                <span x-show="addingUser">Adding...</span>
+                                <span x-show="!addingUser" x-text="t('add_user')"></span>
+                                <span x-show="addingUser" x-text="t('adding')"></span>
                             </button>
                         </div>
                     </div>
@@ -787,41 +898,41 @@
             @click.self="showEditModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold">Edit User</h3>
+                    <h3 class="text-lg font-bold" x-text="t('edit_user')"></h3>
                     <button @click="showEditModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
                 <form @submit.prevent="saveUser">
                     <div class="space-y-4">
                         <input type="text" x-model="editingUser.username"
                             class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="Username">
+                            :placeholder="t('username')">
                         <input type="password" x-model="editingUser.password"
                             class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                            placeholder="New password (leave blank to keep current)">
+                            :placeholder="t('new_password')">
                         <select x-model="editingUser.role"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
+                            <option value="user" x-text="t('user')"></option>
+                            <option value="admin" x-text="t('admin')"></option>
                         </select>
                         
                         <div>
-                            <label class="block text-sm font-medium mb-1">Client Limit</label>
+                            <label class="block text-sm font-medium mb-1" x-text="t('client_limit')"></label>
                             <input type="number" x-model="editingUser.config_limit" min="1"
                                 class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                                placeholder="Number of allowed clients">
-                            <p class="text-xs text-gray-500 mt-1">Maximum number of clients this user can create</p>
+                                :placeholder="t('client_limit_placeholder')">
+                            <p class="text-xs text-gray-500 mt-1" x-text="t('client_limit_help')"></p>
                         </div>
                         
                         <div class="flex justify-end gap-2">
                             <button type="button" @click="showEditModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
-                                Cancel
+                                <span x-text="t('cancel')"></span>
                             </button>
                             <button type="submit"
                                     class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
                                     :disabled="savingUser">
-                                <span x-show="!savingUser">Save</span>
-                                <span x-show="savingUser">Saving...</span>
+                                <span x-show="!savingUser" x-text="t('save')"></span>
+                                <span x-show="savingUser" x-text="t('saving')"></span>
                             </button>
                         </div>
                     </div>
@@ -835,13 +946,13 @@
              @click.self="showUserLimitsModal = false">
             <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold">Edit User Limits</h3>
+                    <h3 class="text-lg font-bold" x-text="t('edit_user_limits')"></h3>
                     <button @click="showUserLimitsModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                 </div>
                 <form @submit.prevent="saveUserLimits">
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-sm font-medium mb-1">Traffic Limit</label>
+                            <label class="block text-sm font-medium mb-1" x-text="t('traffic_limit')"></label>
                             <div class="flex gap-2">
                                 <input type="number" x-model="editingUserLimits.value" min="0" step="0.01"
                                     class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
@@ -851,15 +962,15 @@
                                     <option value="TB">TB</option>
                                 </select>
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">0 = unlimited</p>
+                            <p class="text-xs text-gray-500 mt-1" x-text="t('zero_unlimited')"></p>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium mb-1">Expiry Date</label>
+                            <label class="block text-sm font-medium mb-1" x-text="t('expiry_date')"></label>
                             <div class="flex items-center gap-2">
                                 <input type="datetime-local" x-model="editingUserLimits.expiry_date"
                                     class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
                                 <button type="button" @click="editingUserLimits.expiry_date = ''"
-                                        class="px-2 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm" title="Remove expiry date">
+                                        class="px-2 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm" :title="t('remove_expiry')">
                                     ✕
                                 </button>
                             </div>
@@ -867,11 +978,11 @@
                         <div class="flex justify-end gap-2 mt-4">
                             <button type="button" @click="showUserLimitsModal = false"
                                     class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100">
-                                Cancel
+                                <span x-text="t('cancel')"></span>
                             </button>
                             <button type="submit"
                                     class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
-                                Save
+                                <span x-text="t('save')"></span>
                             </button>
                         </div>
                     </div>
@@ -881,37 +992,93 @@
 
         <!-- Overlay (Config + QR) -->
         <div x-show="showConfigModal"
-             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-             @click.self="showConfigModal = false">
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            @click.self="closeClientConfigModal()">
             <div class="flex gap-6 justify-center items-start max-w-[90vw] w-full">
                 <div class="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-lg font-bold" x-text="'Configuration for ' + selectedClientName"></h3>
-                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        <h3 class="text-lg font-bold" x-text="t('config_for') + ' ' + selectedClientName"></h3>
+                        <button @click="closeClientConfigModal" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                     </div>
                     <pre class="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap break-words" x-text="selectedConfig"></pre>
                     <div class="flex justify-end mt-4">
-                        <button @click="downloadConfig"
-                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
-                            Download Config
+                        <button @click="downloadConfig" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                            <span x-text="t('download_config')"></span>
                         </button>
                     </div>
                 </div>
                 <div class="bg-white rounded-lg p-5 shadow-2xl flex-shrink-0 w-[clamp(220px,18vw,280px)] flex flex-col items-center">
                     <div class="flex justify-between items-center w-full mb-3">
                         <h3 class="text-sm font-semibold">AmneziaWG QR Code</h3>
-                        <button @click="showConfigModal = false" class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
+                        <button @click="closeClientConfigModal" class="text-gray-500 hover:text-gray-700 text-lg">✕</button>
                     </div>
                     <canvas id="qrcode" class="bg-white p-2 rounded shadow" :width="qrSize" :height="qrSize"></canvas>
                     <div class="w-full mt-3" x-show="amneziaLink">
                         <div class="text-xs text-gray-600 mb-1">Amnezia VPN Link:</div>
                         <div class="flex gap-1">
                             <input type="text" :value="amneziaLink" class="flex-1 text-xs border rounded px-2 py-1 bg-gray-50" readonly @click="$event.target.select()">
-                            <button @click="copyToClipboard(amneziaLink)" class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600">Copy</button>
+                            <button @click="copyToClipboard(amneziaLink)" class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600"><span x-text="t('copy')"></span></button>
                         </div>
                     </div>
-                    <div class="text-xs text-gray-600 mt-2 text-center">Scan to import</div>
+                    <div class="text-xs text-gray-600 mt-2 text-center" x-text="t('scan_to_import')"></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- IP History Modal -->
+        <div x-show="showIpHistoryModal" 
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            @click.self="showIpHistoryModal = false">
+            <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">
+                        История IP для клиента <span x-text="selectedClientName"></span>
+                    </h3>
+                    <button @click="showIpHistoryModal = false" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 text-xl">✕</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="bg-gray-100 dark:bg-gray-700">
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">IP адрес</th>
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Впервые замечен</th>
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Последний раз</th>
+                                <th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Кол-во</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="record in ipHistory" :key="record.ip">
+                                <tr class="border-t border-gray-200 dark:border-gray-700">
+                                    <td class="px-4 py-2 font-mono text-sm text-gray-800 dark:text-gray-200" x-text="record.ip">--
+                                    <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400" x-text="formatLocalDate(record.first_seen)">--
+                                    <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400" x-text="formatLocalDate(record.last_seen)">--
+                                    <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400" x-text="record.count">--
+                                </tr>
+                            </template>
+                            <tr x-show="!ipHistory.length">
+                                <td colspan="4" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400">
+                                    История IP отсутствует
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex justify-end mt-4">
+                    <button @click="showIpHistoryModal = false" 
+                            class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+                        Закрыть
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Global Loading Overlay -->
+        <div x-show="globalLoading" 
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            style="backdrop-filter: blur(2px);">
+            <div class="bg-white rounded-lg p-8 shadow-2xl flex flex-col items-center">
+                <div class="loader"></div>
+                <p class="mt-4 text-gray-700 font-medium" x-text="loadingMessage || t('loading')"></p>
             </div>
         </div>
     </div>
@@ -943,6 +1110,9 @@
             newServer: { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' },
             editingServer: { id: null, name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '', is_active: true },
             showEditServerModal: false,
+            showEditConfigModal: false,
+            editingServerConfig: '',
+            editingConfigServerId: null,
             savingServer: false,
             showEditModal: false,
             addingUser: false,
@@ -955,6 +1125,13 @@
             showUserLimitsModal: false,
             showDisabledUsers: true,
             editingUserLimits: { user_id: null, value: 0, unit: 'GB', expiry_date: '' },
+            serversLoaded: false,
+            usersLoaded: false,
+            clientsLoaded: false,
+            dashboardStatsLoaded: false,
+            metricsLoaded: false,
+            globalLoading: false,
+            loadingMessage: '',
             syncing: false,
             qrSize: 400,
             chart: null,
@@ -977,8 +1154,300 @@
                 expiring_soon: [],
                 traffic_history: []
             },
+            showIpHistoryModal: false,
+            ipHistory: [],
+            selectedClientName: '',
+            // Тема и язык
+            theme: localStorage.getItem('theme') || 'light',
+            language: localStorage.getItem('language') || 'ru',
+
+            translations: {
+                ru: {
+                    dashboard: '📊 Дашборд',
+                    servers: '🖥️ Серверы',
+                    clients: '📱 VPN Клиенты',
+                    users: '👥 Пользователи',
+                    logout: 'Выйти',
+                    dark_theme: 'Тёмная тема',
+                    light_theme: 'Светлая тема',
+                    add_server: 'Добавить сервер',
+                    add_client: 'Добавить клиента',
+                    add_user: 'Добавить пользователя',
+                    sync: 'Синхронизировать',
+                    syncing: 'Синхронизация...',
+                    test: 'Тест',
+                    setup: 'Установка',
+                    start: 'Запустить',
+                    stop: 'Остановить',
+                    disable: 'Отключить',
+                    enable: 'Включить',
+                    edit: 'Редактировать',
+                    config: 'Конфиг',
+                    delete: 'Удалить',
+                    cancel: 'Отмена',
+                    save: 'Сохранить',
+                    save_changes: 'Сохранить изменения',
+                    saving: 'Сохранение...',
+                    adding: 'Добавление...',
+                    loading: 'Загрузка...',
+                    close: 'Закрыть',
+                    copy: 'Копировать',
+                    download_config: 'Скачать конфиг',
+                    scan_to_import: 'Отсканируйте для добавления',
+                    config_for: 'Конфигурация для',
+                    edit_server: 'Редактировать сервер',
+                    edit_server_config: 'Редактировать конфигурацию сервера',
+                    server_setup_log: 'Лог установки сервера',
+                    add_new_client: 'Добавить нового клиента',
+                    client_name: 'Имя клиента',
+                    client_name_placeholder: 'например, iPhone 15',
+                    server: 'Сервер',
+                    user: 'Пользователь',
+                    select_user: 'Выберите пользователя',
+                    add_new_server: 'Добавить новый сервер',
+                    server_name: 'Название сервера',
+                    host: 'Адрес',
+                    username: 'Имя пользователя',
+                    ssh_port: 'SSH порт (по умолчанию 22)',
+                    password: 'Пароль',
+                    password_if_needed: 'Пароль (если нужен)',
+                    private_key: 'Приватный ключ (с BEGIN и END)',
+                    server_active: 'Сервер активен',
+                    add_new_user: 'Добавить нового пользователя',
+                    new_password: 'Новый пароль (оставьте пустым, чтобы не менять)',
+                    client_limit: 'Лимит клиентов',
+                    client_limit_placeholder: 'Максимальное количество клиентов',
+                    client_limit_help: 'Максимальное количество клиентов, которое может создать пользователь',
+                    edit_user: 'Редактировать пользователя',
+                    edit_user_limits: 'Редактировать лимиты пользователя',
+                    traffic_limit: 'Лимит трафика',
+                    zero_unlimited: '0 = безлимит',
+                    expiry_date: 'Срок действия',
+                    remove_expiry: 'Убрать срок действия',
+                    show_disabled_accounts: 'Показывать заблокированные аккаунты',
+                    unknown_user: 'Неизвестный пользователь',
+                    account_disabled: '(Аккаунт заблокирован)',
+                    limit: 'Лимит',
+                    used: 'Использовано',
+                    expires: 'Истекает',
+                    never: 'Никогда',
+                    name: 'Имя',
+                    ip: 'IP',
+                    traffic: 'Трафик',
+                    handshake: 'Рукопожатие',
+                    status: 'Статус',
+                    actions: 'Действия',
+                    active: 'Активен',
+                    blocked: 'Заблокирован',
+                    active_dashboard: 'активно',
+                    blocked_dashboard: 'заблокировано',
+                    role: 'Роль',
+                    config_limit: 'Лимит конфигов',
+                    created: 'Создан',
+                    online: 'онлайн',
+                    issues: 'Проблемы',
+                    issues_count: 'проблем(-ы)',
+                    total_traffic: 'Общий трафик',
+                    today: 'Сегодня',
+                    active_now: 'Активно сейчас',
+                    last_5_minutes: 'Последние 5 минут',
+                    traffic_last_30: 'Трафик за последние 30 дней',
+                    system_monitoring: '📈 Статистика серверов',
+                    cpu_usage: 'Загрузка CPU',
+                    memory_usage: 'Использование памяти',
+                    speedtest_download: 'Speedtest - загрузка',
+                    speedtest_upload: 'Speedtest - отдача',
+                    top_users_by_traffic: 'Топ 10 пользователей по трафику',
+                    no_issues: 'Нет проблем',
+                    expiring_soon: 'Скоро истекает',
+                    no_expiring: 'Нет истекающих подписок',
+                    type: 'Тип',
+                    disabled: 'Отключён',
+                    not_available: 'Недоступен',
+                    local_server_info: 'Локальный сервер (всегда доступен)',
+                    checking: 'Проверка...',
+                    offline: 'Офлайн',
+                    working: 'Работает',
+                    start_container: 'Запустить контейнер',
+                    stop_container: 'Остановить контейнер',
+                    disable_server: 'Отключить сервер в панели',
+                    enable_server: 'Включить сервер в панели',
+                    local: 'Локальный',
+                    key: 'Ключ',
+                    key_sudo: 'Ключ + sudo',
+                    unlimited: 'Безлимит',
+                    no_limit: 'Нет лимита',
+                    admin: 'Администратор',
+                    edit_limits: 'Редактировать лимиты',
+                    no_clients: 'Нет клиентов. Используйте "Синхронизировать с серверов" или добавьте нового клиента.',
+                    server_disabled: 'Сервер отключён',
+                    expires_label: 'Истекает:',
+                    role_label: 'Роль:',
+                    admin: 'Администратор',
+                    user: 'Пользователь',
+                    loading_servers: 'Загрузка серверов...',
+                    loading_users: 'Загрузка пользователей...',
+                    loading_clients: 'Загрузка клиентов...',
+                    loading_dashboard: 'Загрузка дашборда...',
+                    loading_metrics: 'Загрузка метрик...',
+                    last_ip: 'Последний IP',
+                },
+                en: {
+                    dashboard: '📊 Dashboard',
+                    servers: '🖥️ Servers',
+                    clients: '📱 VPN Clients',
+                    users: '👥 Users',
+                    logout: 'Logout',
+                    dark_theme: 'Dark theme',
+                    light_theme: 'Light theme',
+                    add_server: 'Add Server',
+                    add_client: 'Add Client',
+                    add_user: 'Add User',
+                    sync: 'Sync',
+                    syncing: 'Syncing...',
+                    test: 'Test',
+                    setup: 'Setup',
+                    start: 'Start',
+                    stop: 'Stop',
+                    disable: 'Disable',
+                    enable: 'Enable',
+                    edit: 'Edit',
+                    config: 'Config',
+                    delete: 'Delete',
+                    cancel: 'Cancel',
+                    save: 'Save',
+                    save_changes: 'Save Changes',
+                    saving: 'Saving...',
+                    adding: 'Adding...',
+                    loading: 'Loading...',
+                    close: 'Close',
+                    copy: 'Copy',
+                    download_config: 'Download Config',
+                    scan_to_import: 'Scan to import',
+                    config_for: 'Configuration for',
+                    edit_server: 'Edit Server',
+                    edit_server_config: 'Edit Server Config',
+                    server_setup_log: 'Server Setup Log',
+                    add_new_client: 'Add New Client',
+                    client_name: 'Client Name',
+                    client_name_placeholder: 'e.g. iPhone 15',
+                    server: 'Server',
+                    user: 'User',
+                    select_user: 'Select user',
+                    add_new_server: 'Add New Server',
+                    server_name: 'Server name',
+                    host: 'Host (IP or domain)',
+                    username: 'Username',
+                    ssh_port: 'SSH port (default 22)',
+                    password: 'Password',
+                    password_if_needed: 'Password (if needed)',
+                    private_key: 'Private key (with BEGIN and END)',
+                    server_active: 'Server is active',
+                    add_new_user: 'Add New User',
+                    new_password: 'New password (leave blank to keep current)',
+                    client_limit: 'Client Limit',
+                    client_limit_placeholder: 'Maximum number of clients',
+                    client_limit_help: 'Maximum number of clients this user can create',
+                    edit_user: 'Edit User',
+                    edit_user_limits: 'Edit User Limits',
+                    traffic_limit: 'Traffic Limit',
+                    zero_unlimited: '0 = unlimited',
+                    expiry_date: 'Expiry Date',
+                    remove_expiry: 'Remove expiry date',
+                    show_disabled_accounts: 'Show disabled accounts',
+                    unknown_user: 'Unknown user',
+                    account_disabled: '(Account disabled)',
+                    limit: 'Limit',
+                    used: 'Used',
+                    expires: 'Expires',
+                    never: 'Never',
+                    name: 'Name',
+                    ip: 'IP',
+                    traffic: 'Traffic',
+                    handshake: 'Handshake',
+                    status: 'Status',
+                    actions: 'Actions',
+                    active: 'Active',
+                    blocked: 'Blocked',
+                    active_dashboard: 'Active',
+                    blocked_dashboard: 'Blocked',
+                    role: 'Role',
+                    config_limit: 'Config Limit',
+                    created: 'Created',
+                    online: 'online',
+                    issues: 'Issues',
+                    issues_count: 'issues',
+                    total_traffic: 'Total Traffic',
+                    today: 'Today',
+                    active_now: 'Active Now',
+                    last_5_minutes: 'Last 5 minutes',
+                    traffic_last_30: 'Traffic (last 30 days)',
+                    system_monitoring: '📈 System Monitoring',
+                    cpu_usage: 'CPU Usage',
+                    memory_usage: 'Memory Usage',
+                    speedtest_download: 'Speedtest Download',
+                    speedtest_upload: 'Speedtest Upload',
+                    top_users_by_traffic: 'Top 10 Users by Traffic',
+                    no_issues: 'No issues',
+                    expiring_soon: 'Expiring Soon',
+                    no_expiring: 'No expiring subscriptions',
+                    type: 'Type',
+                    disabled: 'Disabled',
+                    not_available: 'Not Available',
+                    local_server_info: 'Local server (always available)',
+                    checking: 'Checking...',
+                    offline: 'Offline',
+                    working: 'Working',
+                    start_container: 'Start container',
+                    stop_container: 'Stop container',
+                    disable_server: 'Disable server in panel',
+                    enable_server: 'Enable server in panel',
+                    local: 'Local',
+                    key: 'Key',
+                    key_sudo: 'Key + sudo',
+                    unlimited: 'Unlimited',
+                    no_limit: 'No limit',
+                    admin: 'Admin',
+                    edit_limits: 'Edit limits',
+                    no_clients: 'No clients found. Use "Sync from servers" or add a new client.',
+                    server_disabled: 'Server is disabled',
+                    expires_label: 'Expires:',
+                    role_label: 'Role:',
+                    admin: 'Admin',
+                    user: 'User',
+                    loading_servers: 'Loading servers...',
+                    loading_users: 'Loading users...',
+                    loading_clients: 'Loading clients...',
+                    loading_dashboard: 'Loading dashboard...',
+                    loading_metrics: 'Loading metrics...',
+                    last_ip: 'Last IP',
+                }
+            },
 
             getToken() { return localStorage.getItem('token'); },
+
+            t(key) {
+                return this.translations[this.language][key] || key;
+            },
+
+            toggleTheme() {
+                this.theme = this.theme === 'light' ? 'dark' : 'light';
+                localStorage.setItem('theme', this.theme);
+                this.applyTheme();
+            },
+
+            applyTheme() {
+                if (this.theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+            },
+
+            setLanguage(lang) {
+                this.language = lang;
+                localStorage.setItem('language', lang);
+            },
 
             async init() {
                 const token = this.getToken();
@@ -989,32 +1458,72 @@
                     return;
                 }
                 this.currentUser = username;
-                await this.fetchServers();
-                if (this.servers.length > 0) {
-                    this.selectedServerId = this.servers[0].id;
-                }
-                await this.loadAllData();
-                await this.fetchUsers();
-                this.loadDashboardStats()
-                this.fetchTraffic();
-                await this.loadMetrics();
-                setInterval(() => this.fetchTraffic(), 5000);
-                setInterval(() => this.loadDashboardStats(), 5000)
-                setInterval(() => {
-                    this.servers.forEach(server => {
-                        if (server.is_active) {
-                            this.fetchServerStatus(server.id);
-                        }
-                    });
-                }, 30000);
-                setInterval(() => this.loadMetrics(), 30000);
+                this.applyTheme();
 
-                document.addEventListener('visibilitychange', async () => {
-                    if (!document.hidden && this.activeTab === 'dashboard') {
-                        // console.log('Tab visible, refreshing charts');
-                        this.destroyAllCharts();
-                        await this.loadMetrics();
-                        await this.loadDashboardStats();
+                // Первичная загрузка (только текущая вкладка)
+                if (this.activeTab === 'dashboard') {
+                    await this.loadDashboardStatsIfNeeded();
+                    await this.loadMetricsIfNeeded();
+                }
+                await this.loadServersIfNeeded();
+
+                this.intervals = [];
+
+                // Обновление трафика (клиенты и дашборд)
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'clients' || this.activeTab === 'dashboard') {
+                        this.fetchTraffic();
+                    }
+                }, 5000));
+
+                // Статистика дашборда
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'dashboard') {
+                        this.loadDashboardStatsIfNeeded();
+                    }
+                }, 5000));
+
+                // Статусы серверов
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'servers') {
+                        this.servers.forEach(server => {
+                            if (server.is_active && server.id !== 1) {
+                                this.fetchServerStatus(server.id);
+                            }
+                        });
+                    }
+                }, 30000));
+
+                // Метрики (графики)
+                this.intervals.push(setInterval(() => {
+                    if (this.activeTab === 'dashboard') {
+                        this.loadMetricsIfNeeded();
+                    }
+                }, 30000));
+
+                // Следим за сменой вкладки
+                this.$watch('activeTab', async (newTab) => {
+                    if (newTab === 'servers') {
+                        this.serversLoaded = false;
+                        await this.loadServersIfNeeded();
+                    } else if (newTab === 'users') {
+                        this.usersLoaded = false;
+                        await this.loadUsersIfNeeded();
+                    } else if (newTab === 'clients') {
+                        this.clientsLoaded = false;
+                        await this.loadClientsIfNeeded();
+                        await this.fetchTraffic();
+                    } else if (newTab === 'dashboard') {
+                        this.dashboardStatsLoaded = false;
+                        this.metricsLoaded = false;
+                        await this.loadDashboardStatsIfNeeded();
+                        await this.loadMetricsIfNeeded();
+                    }
+                });
+
+                window.addEventListener('beforeunload', () => {
+                    if (this.intervals) {
+                        this.intervals.forEach(clearInterval);
                     }
                 });
             },
@@ -1070,94 +1579,99 @@
             },
 
             async addClientModal() {
-                this.adding = true;
-                this.error = '';
-                this.success = '';
-                try {
-                    if (!this.selectedUserId) {
-                        this.error = 'Please select a user';
-                        return;
+                await this.withGlobalLoading(async () => {
+                    this.adding = true;
+                    this.error = '';
+                    this.success = '';
+                    try {
+                        if (!this.selectedUserId) {
+                            this.error = 'Please select a user';
+                            return;
+                        }
+                        const url = this.selectedServerId && this.selectedServerId !== 1
+                            ? `/api/clients?server_id=${this.selectedServerId}`
+                            : '/api/clients';
+                        const response = await fetch(url, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${this.getToken()}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                name: this.newClientName,
+                                user_id: this.selectedUserId
+                            })
+                        });
+                        if (response.ok) {
+                            const newClient = await response.json();
+                            const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
+                            newClient.server_name = server?.name || 'local';
+                            newClient.server_id = this.selectedServerId || 1;
+                            this.clients.push(newClient);
+                            this.newClientName = '';
+                            this.success = 'Client added successfully';
+                            await this.loadAllData();
+                            await this.fetchUsers();
+                            setTimeout(() => this.success = '', 3000);
+                            this.showAddClientModal = false;
+                            this.showConfig(newClient);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to add client';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to add client';
+                    } finally {
+                        this.adding = false;
                     }
-                    const url = this.selectedServerId && this.selectedServerId !== 1
-                        ? `/api/clients?server_id=${this.selectedServerId}`
-                        : '/api/clients';
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${this.getToken()}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            name: this.newClientName,
-                            user_id: this.selectedUserId
-                        })
-                    });
-                    if (response.ok) {
-                        const newClient = await response.json();
-                        const server = this.servers.find(s => s.id === (this.selectedServerId || 1));
-                        newClient.server_name = server?.name || 'local';
-                        newClient.server_id = this.selectedServerId || 1;
-                        this.clients.push(newClient);
-                        this.newClientName = '';
-                        this.success = 'Client added successfully';
-                        this.loadAllData();
-                        setTimeout(() => this.success = '', 3000);
-                        this.showAddClientModal = false;
-                        this.showConfig(newClient);
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to add client';
-                    }
-                } catch (err) {
-                    this.error = 'Failed to add client';
-                } finally {
-                    this.adding = false;
-                }
+                }, this.t('adding'));
             },
 
             async showConfig(client) {
-                try {
-                    let config = client.config;
-                    if (!config) {
-                        const url = client.server_id
-                            ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
-                            : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
-                        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${this.getToken()}` } });
-                        if (response.ok) {
-                            const data = await response.json();
-                            config = data.config;
-                        } else {
-                            this.error = 'Failed to get config';
+                await this.withGlobalLoading(async () => {
+                    try {
+                        let config = client.config;
+                        if (!config) {
+                            const url = client.server_id
+                                ? `/api/user-config?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`
+                                : `/api/user-config?public_key=${encodeURIComponent(client.public_key)}`;
+                            const response = await fetch(url, { headers: { 'Authorization': `Bearer ${this.getToken()}` } });
+                            if (response.ok) {
+                                const data = await response.json();
+                                config = data.config;
+                            } else {
+                                this.error = 'Failed to get config';
+                                return;
+                            }
+                        }
+                        if (!config) {
+                            this.error = 'Config is empty';
                             return;
                         }
-                    }
-                    if (!config) {
-                        this.error = 'Config is empty';
-                        return;
-                    }
-                    this.selectedConfig = config;
-                    this.selectedClientName = client.name;
-                    this.showConfigModal = true;
-                    await this.$nextTick();
-                    setTimeout(() => {
-                        const qrContainer = document.getElementById('qrcode');
-                        if (qrContainer && config) {
-                            qrContainer.innerHTML = '';
-                            QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
+                        this.selectedConfig = config;
+                        this.selectedClientName = client.name;
+                        this.showConfigModal = true;
+                        await this.$nextTick();
+                        setTimeout(() => {
+                            const qrContainer = document.getElementById('qrcode');
+                            if (qrContainer && config) {
+                                qrContainer.innerHTML = '';
+                                QRCode.toCanvas(qrContainer, config, { width: this.qrSize });
+                            }
+                        }, 50);
+                        const linkResponse = await fetch(
+                            `/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`,
+                            { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
+                        );
+                        if (linkResponse.ok) {
+                            const linkData = await linkResponse.json();
+                            this.amneziaLink = linkData.link;
                         }
-                    }, 50);
-                    const linkResponse = await fetch(
-                        `/api/generate-link?public_key=${encodeURIComponent(client.public_key)}&server_id=${client.server_id}`,
-                        { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
-                    );
-                    if (linkResponse.ok) {
-                        const linkData = await linkResponse.json();
-                        this.amneziaLink = linkData.link;
+                    } catch (err) {
+                        console.error('showConfig error:', err);
+                        this.error = 'Failed to get config';
                     }
-                } catch (err) {
-                    console.error('showConfig error:', err);
-                    this.error = 'Failed to get config';
-                }
+                }, this.t('loading'));
             },
 
             downloadConfig() {
@@ -1171,24 +1685,27 @@
             },
 
             async deleteClient(publicKey, clientName) {
-                if (!confirm(`Are you sure you want to delete ${clientName}?`)) return;
-                try {
-                    const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.clients = this.clients.filter(c => c.public_key !== publicKey);
-                        this.success = 'Client deleted successfully';
-                        this.loadAllData();
-                        setTimeout(() => this.success = '', 3000);
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to delete client';
+                await this.withGlobalLoading(async () => {
+                    if (!confirm(`Are you sure you want to delete ${clientName}?`)) return;
+                    try {
+                        const response = await fetch(`/api/clients?public_key=${encodeURIComponent(publicKey)}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.clients = this.clients.filter(c => c.public_key !== publicKey);
+                            this.success = 'Client deleted successfully';
+                            await this.loadAllData();
+                            await this.fetchUsers();
+                            setTimeout(() => this.success = '', 3000);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to delete client';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to delete client';
                     }
-                } catch (err) {
-                    this.error = 'Failed to delete client';
-                }
+                }, this.t('delete'));
             },
 
             formatBytes(bytes) {
@@ -1207,25 +1724,27 @@
             },
 
             async addUser() {
-                this.addingUser = true;
-                try {
-                    const response = await fetch('/api/users', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(this.newUser)
-                    });
-                    if (response.ok) {
-                        this.newUser = { username: '', password: '', role: 'user' };
-                        this.success = 'User created successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showAddUserModal = false;
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to create user';
-                    }
-                } catch (err) { this.error = 'Failed to create user'; }
-                finally { this.addingUser = false; }
+                await this.withGlobalLoading(async () => {
+                    this.addingUser = true;
+                    try {
+                        const response = await fetch('/api/users', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.newUser)
+                        });
+                        if (response.ok) {
+                            this.newUser = { username: '', password: '', role: 'user' };
+                            this.success = 'User created successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showAddUserModal = false;
+                            await this.fetchUsers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to create user';
+                        }
+                    } catch (err) { this.error = 'Failed to create user'; }
+                    finally { this.addingUser = false; }
+                }, this.t('adding'));
             },
 
             editUser(user) {
@@ -1238,56 +1757,60 @@
             },
 
             async saveUser() {
-                this.savingUser = true;
-                try {
-                    const response = await fetch(`/api/users/${this.editingUser.id}`, {
-                        method: 'PUT',
-                        headers: { 
-                            'Authorization': `Bearer ${this.getToken()}`, 
-                            'Content-Type': 'application/json' 
-                        },
-                        body: JSON.stringify({
-                            username: this.editingUser.username || null,
-                            password: this.editingUser.password || null,
-                            role: this.editingUser.role || null,
-                            config_limit: this.editingUser.config_limit
-                        })
-                    });
-                    if (response.ok) {
-                        this.success = 'User updated successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showEditModal = false;
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to update user';
+                await this.withGlobalLoading(async () => {
+                    this.savingUser = true;
+                    try {
+                        const response = await fetch(`/api/users/${this.editingUser.id}`, {
+                            method: 'PUT',
+                            headers: { 
+                                'Authorization': `Bearer ${this.getToken()}`, 
+                                'Content-Type': 'application/json' 
+                            },
+                            body: JSON.stringify({
+                                username: this.editingUser.username || null,
+                                password: this.editingUser.password || null,
+                                role: this.editingUser.role || null,
+                                config_limit: this.editingUser.config_limit
+                            })
+                        });
+                        if (response.ok) {
+                            this.success = 'User updated successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showEditModal = false;
+                            await this.fetchUsers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to update user';
+                        }
+                    } catch (err) { 
+                        this.error = 'Failed to update user'; 
+                    } finally { 
+                        this.savingUser = false; 
                     }
-                } catch (err) { 
-                    this.error = 'Failed to update user'; 
-                } finally { 
-                    this.savingUser = false; 
-                }
+                }, this.t('saving'));
             },
             
             async toggleUserStatus(user) {
-                const action = user.is_disabled ? 'enable' : 'disable';
-                if (!confirm(`Are you sure you want to ${action} user "${user.username}"?`)) return;
-                try {
-                    const response = await fetch(`/api/users/${user.id}/${action}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.success = `User ${action}d successfully`;
-                        setTimeout(() => this.success = '', 3000);
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || `Failed to ${action} user`;
+                await this.withGlobalLoading(async () => {
+                    const action = user.is_disabled ? 'enable' : 'disable';
+                    if (!confirm(`Are you sure you want to ${action} user "${user.username}"?`)) return;
+                    try {
+                        const response = await fetch(`/api/users/${user.id}/${action}`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.success = `User ${action}d successfully`;
+                            setTimeout(() => this.success = '', 3000);
+                            await this.fetchUsers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || `Failed to ${action} user`;
+                        }
+                    } catch (err) {
+                        this.error = `Failed to ${action} user`;
                     }
-                } catch (err) {
-                    this.error = `Failed to ${action} user`;
-                }
+                }, this.t('saving'));
             },
 
             deleteUserConfirm(user) {
@@ -1296,20 +1819,27 @@
             },
 
             async deleteUser(userId) {
-                try {
-                    const response = await fetch(`/api/users/${userId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.success = 'User deleted successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.fetchUsers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to delete user';
+                await this.withGlobalLoading(async () => {
+                    try {
+                        const response = await fetch(`/api/users/${userId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.success = 'User deleted successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            await this.fetchUsers();
+                            await this.loadAllData();
+                            this.usersLoaded = false;
+                            this.clientsLoaded = false;
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to delete user';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to delete user';
                     }
-                } catch (err) { this.error = 'Failed to delete user'; }
+                }, this.t('delete'));
             },
 
             copyToClipboard(text) {
@@ -1385,7 +1915,6 @@
                     }
                 } catch (err) {
                     console.error(`Failed to fetch status for server ${serverId}:`, err);
-                    // Если нужен повтор, устанавливаем таймер
                     if (retryOnError) {
                         setTimeout(() => this.fetchServerStatus(serverId, false), 5000);
                     }
@@ -1393,54 +1922,58 @@
             },
 
             async addServer() {
-                this.addingServer = true;
-                try {
-                    const response = await fetch('/api/servers', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(this.newServer)
-                    });
-                    if (response.ok) {
-                        this.newServer = { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' };
-                        this.success = 'Server added successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showAddServerModal = false;
-                        this.fetchServers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to add server';
-                    }
-                } catch (err) { this.error = 'Failed to add server'; }
-                finally { this.addingServer = false; }
+                await this.withGlobalLoading(async () => {
+                    this.addingServer = true;
+                    try {
+                        const response = await fetch('/api/servers', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.newServer)
+                        });
+                        if (response.ok) {
+                            this.newServer = { name: '', host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '' };
+                            this.success = 'Server added successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showAddServerModal = false;
+                            await this.fetchServers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to add server';
+                        }
+                    } catch (err) { this.error = 'Failed to add server'; }
+                    finally { this.addingServer = false; }
+                }, this.t('adding'));
             },
 
             async testServer(serverId) {
-                const server = this.servers.find(s => s.id === serverId);
-                if (!server) return;
-                if (server.testing === undefined) {
-                    this.$set(server, 'testing', true);
-                } else {
-                    server.testing = true;
-                }
-                try {
-                    const response = await fetch(`/api/servers/${serverId}/test`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.success = 'Connection successful';
-                        await this.fetchServerStatus(serverId);
+                await this.withGlobalLoading(async () => {
+                    const server = this.servers.find(s => s.id === serverId);
+                    if (!server) return;
+                    if (server.testing === undefined) {
+                        this.$set(server, 'testing', true);
                     } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Connection failed';
+                        server.testing = true;
                     }
-                } catch (err) {
-                    this.error = 'Connection test failed';
-                } finally {
-                    server.testing = false;
-                    setTimeout(() => this.success = '', 3000);
-                    setTimeout(() => this.error = '', 3000);
-                }
+                    try {
+                        const response = await fetch(`/api/servers/${serverId}/test`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.success = 'Connection successful';
+                            await this.fetchServerStatus(serverId);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Connection failed';
+                        }
+                    } catch (err) {
+                        this.error = 'Connection test failed';
+                    } finally {
+                        server.testing = false;
+                        setTimeout(() => this.success = '', 3000);
+                        setTimeout(() => this.error = '', 3000);
+                    }
+                }, this.t('test'));
             },
 
             async setupServer(serverId) {
@@ -1473,41 +2006,46 @@
 
             async deleteServer(serverId, serverName) {
                 if (!confirm(`Are you sure you want to delete server "${serverName}"?`)) return;
-                try {
-                    const response = await fetch(`/api/servers/${serverId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (response.ok) {
-                        this.servers = this.servers.filter(s => s.id !== serverId);
-                        this.success = 'Server deleted successfully';
-                        setTimeout(() => this.success = '', 3000);
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to delete server';
-                    }
-                } catch (err) { this.error = 'Failed to delete server'; }
+                await this.withGlobalLoading(async () => {
+                    try {
+                        const response = await fetch(`/api/servers/${serverId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.servers = this.servers.filter(s => s.id !== serverId);
+                            this.success = 'Server deleted successfully';
+                            setTimeout(() => this.success = '', 3000);
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to delete server';
+                        }
+                    } catch (err) { this.error = 'Failed to delete server'; }
+                }, this.t('delete'));
             },
 
             async syncClients() {
-                this.syncing = true;
-                this.error = '';
-                try {
-                    const token = this.getToken();
-                    for (const server of this.servers) {
-                        if (!server.is_active) continue;
-                        const url = `/api/clients?server_id=${server.id}`;
-                        await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                await this.withGlobalLoading(async () => {
+                    this.syncing = true;
+                    this.error = '';
+                    try {
+                        const token = this.getToken();
+                        for (const server of this.servers) {
+                            if (!server.is_active) continue;
+                            const url = `/api/clients?server_id=${server.id}`;
+                            await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                        }
+                        await this.loadAllData();
+                        await this.fetchUsers();
+                        this.success = 'Clients synchronized successfully';
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (err) {
+                        console.error('syncClients error:', err);
+                        this.error = 'Failed to sync clients';
+                    } finally {
+                        this.syncing = false;
                     }
-                    await this.loadAllData();
-                    this.success = 'Clients synchronized successfully';
-                    setTimeout(() => this.success = '', 3000);
-                } catch (err) {
-                    console.error('syncClients error:', err);
-                    this.error = 'Failed to sync clients';
-                } finally {
-                    this.syncing = false;
-                }
+                }, this.t('syncing'));
             },
 
             editUserLimits(group) {
@@ -1553,48 +2091,46 @@
             },
 
             async saveUserLimits() {
-                const user_id = this.editingUserLimits.user_id;
-                const multiplier = { 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024, 'TB': 1024 * 1024 * 1024 * 1024 };
-                let limitBytes = this.editingUserLimits.value * multiplier[this.editingUserLimits.unit];
-                limitBytes = Math.round(limitBytes);
+                await this.withGlobalLoading(async () => {
+                    const user_id = this.editingUserLimits.user_id;
+                    const multiplier = { 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024, 'TB': 1024 * 1024 * 1024 * 1024 };
+                    let limitBytes = this.editingUserLimits.value * multiplier[this.editingUserLimits.unit];
+                    limitBytes = Math.round(limitBytes);
 
-                try {
-                    const limitResponse = await fetch(`/api/users/${user_id}/traffic-limit?limit_bytes=${limitBytes}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
-                    });
-                    if (!limitResponse.ok) {
-                        const err = await limitResponse.json();
-                        this.error = err.detail || 'Failed to update limit';
-                        return;
+                    try {
+                        const limitResponse = await fetch(`/api/users/${user_id}/traffic-limit?limit_bytes=${limitBytes}`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (!limitResponse.ok) {
+                            const err = await limitResponse.json();
+                            this.error = err.detail || 'Failed to update limit';
+                            return;
+                        }
+
+                        let expiryToSend = null;
+                        if (this.editingUserLimits.expiry_date) {
+                            expiryToSend = this.formatServerDate(this.editingUserLimits.expiry_date);
+                        }
+                        const expiryResponse = await fetch(`/api/users/${user_id}/expiry`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ expiry_date: expiryToSend })
+                        });
+                        if (!expiryResponse.ok) {
+                            const err = await expiryResponse.json();
+                            this.error = err.detail || 'Failed to update expiry';
+                            return;
+                        }
+
+                        await this.loadAllData();
+                        await this.fetchUsers();
+                        this.success = 'User limits updated successfully';
+                        this.showUserLimitsModal = false;
+                    } catch (err) {
+                        this.error = 'Failed to save user limits';
                     }
-
-                    let expiryToSend = null;
-                    if (this.editingUserLimits.expiry_date) {
-                        expiryToSend = this.formatServerDate(this.editingUserLimits.expiry_date);
-                    }
-
-                    const expiryResponse = await fetch(`/api/users/${user_id}/expiry`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${this.getToken()}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ expiry_date: expiryToSend })
-                    });
-                    if (!expiryResponse.ok) {
-                        const err = await expiryResponse.json();
-                        this.error = err.detail || 'Failed to update expiry';
-                        return;
-                    }
-
-                    await this.loadAllData();
-                    await this.fetchUsers();
-                    this.success = 'User limits updated successfully';
-                    this.showUserLimitsModal = false;
-                } catch (err) {
-                    this.error = 'Failed to save user limits';
-                } finally {
-                    setTimeout(() => this.success = '', 3000);
-                    setTimeout(() => this.error = '', 3000);
-                }
+                }, this.t('saving'));
             },
 
             logout() {
@@ -1647,46 +2183,48 @@
             },
 
             async updateServer() {
-                this.savingServer = true;
-                try {
-                    const updateData = {
-                        name: this.editingServer.name,
-                        host: this.editingServer.host || null,
-                        port: parseInt(this.editingServer.port) || 22,
-                        username: this.editingServer.username || null,
-                        auth_type: this.editingServer.auth_type,
-                        is_active: this.editingServer.is_active
-                    };
-                    if (this.editingServer.password && this.editingServer.password.trim() !== '') {
-                        updateData.password = this.editingServer.password;
-                    }
-                    if (this.editingServer.private_key && this.editingServer.private_key.trim() !== '') {
-                        updateData.private_key = this.editingServer.private_key;
-                    }
+                await this.withGlobalLoading(async () => {
+                    this.savingServer = true;
+                    try {
+                        const updateData = {
+                            name: this.editingServer.name,
+                            host: this.editingServer.host || null,
+                            port: parseInt(this.editingServer.port) || 22,
+                            username: this.editingServer.username || null,
+                            auth_type: this.editingServer.auth_type,
+                            is_active: this.editingServer.is_active
+                        };
+                        if (this.editingServer.password && this.editingServer.password.trim() !== '') {
+                            updateData.password = this.editingServer.password;
+                        }
+                        if (this.editingServer.private_key && this.editingServer.private_key.trim() !== '') {
+                            updateData.private_key = this.editingServer.private_key;
+                        }
 
-                    const response = await fetch(`/api/servers/${this.editingServer.id}`, {
-                        method: 'PUT',
-                        headers: {
-                            'Authorization': `Bearer ${this.getToken()}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(updateData)
-                    });
+                        const response = await fetch(`/api/servers/${this.editingServer.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${this.getToken()}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(updateData)
+                        });
 
-                    if (response.ok) {
-                        this.success = 'Server updated successfully';
-                        setTimeout(() => this.success = '', 3000);
-                        this.showEditServerModal = false;
-                        await this.fetchServers();
-                    } else {
-                        const error = await response.json();
-                        this.error = error.detail || 'Failed to update server';
+                        if (response.ok) {
+                            this.success = 'Server updated successfully';
+                            setTimeout(() => this.success = '', 3000);
+                            this.showEditServerModal = false;
+                            await this.fetchServers();
+                        } else {
+                            const error = await response.json();
+                            this.error = error.detail || 'Failed to update server';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to update server';
+                    } finally {
+                        this.savingServer = false;
                     }
-                } catch (err) {
-                    this.error = 'Failed to update server';
-                } finally {
-                    this.savingServer = false;
-                }
+                }, this.t('saving'));
             },
 
             async toggleServer(server) {
@@ -1805,7 +2343,6 @@
                 const canvas = this.$refs.trafficChart;
                 if (!canvas) return;
                 
-                // Уничтожаем старый график
                 if (this.chart) {
                     try { this.chart.destroy(); } catch(e) {}
                     this.chart = null;
@@ -1871,7 +2408,6 @@
                     const start = now - range.seconds;
                     const step = range.step;
 
-                    // 1. CPU
                     const cpuQuery = `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`;
                     const cpuRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(cpuQuery)}&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
@@ -1881,7 +2417,6 @@
                         this.renderChart('cpuChart', data, 'CPU %');
                     }
 
-                    // 2. Memory (аналогично)
                     const memQuery = `(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100`;
                     const memRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(memQuery)}&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
@@ -1890,7 +2425,6 @@
                         const data = await memRes.json();
                         this.renderChart('memoryChart', data, 'Memory %');
                     } else {
-                        // альтернативный запрос
                         const altMemQuery = `(1 - ((node_memory_MemFree_bytes + node_memory_Cached_bytes + node_memory_Buffers_bytes) / node_memory_MemTotal_bytes)) * 100`;
                         const altRes = await fetch(`/api/metrics/query_range?query=${encodeURIComponent(altMemQuery)}&start=${start}&end=${now}&step=${step}`, {
                             headers: { 'Authorization': `Bearer ${token}` }
@@ -1901,7 +2435,6 @@
                         }
                     }
 
-                    // 3. Speedtest Download
                     const speedtestRes = await fetch(`/api/metrics/query_range?query=download_speed_bps / 1000000&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
@@ -1910,7 +2443,6 @@
                         this.renderChart('speedtestDownloadChart', data, 'Download (Mbps)');
                     }
 
-                    // 4. Speedtest Upload
                     const speedtestUploadRes = await fetch(`/api/metrics/query_range?query=upload_speed_bps / 1000000&start=${start}&end=${now}&step=${step}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
@@ -1930,7 +2462,6 @@
                 const canvas = document.getElementById(canvasId);
                 if (!canvas) return;
                 
-                // Уничтожаем старый график
                 if (this.charts && this.charts[canvasId]) {
                     try { this.charts[canvasId].destroy(); } catch(e) {}
                     delete this.charts[canvasId];
@@ -1992,7 +2523,6 @@
             },
 
             destroyAllCharts() {
-                // Уничтожаем все графики
                 if (this.chart) {
                     try {
                         this.chart.destroy();
@@ -2009,7 +2539,6 @@
                     this.charts = {};
                 }
                 
-                // Очищаем все canvas
                 const canvases = ['trafficChart', 'cpuChart', 'memoryChart', 'networkDownloadChart', 'networkUploadChart', 'speedtestDownloadChart', 'speedtestUploadChart'];
                 canvases.forEach(id => {
                     const canvas = document.getElementById(id);
@@ -2030,7 +2559,7 @@
             formatLocalDate(serverDateStr) {
                 if (!serverDateStr) return '';
                 const utcDate = new Date(serverDateStr.replace(' ', 'T') + 'Z');
-                return utcDate.toLocaleString(); // локальный формат
+                return utcDate.toLocaleString();
             },
 
             formatServerDate(localDateStr) {
@@ -2054,6 +2583,144 @@
                 const hours = String(utcDate.getHours()).padStart(2, '0');
                 const minutes = String(utcDate.getMinutes()).padStart(2, '0');
                 return `${year}-${month}-${day}T${hours}:${minutes}`;
+            },
+
+            closeEditConfigModal() {
+                this.showEditConfigModal = false;
+                this.editingServerConfig = '';
+                this.editingConfigServerId = null;
+            },
+
+            closeClientConfigModal() {
+                this.showConfigModal = false;
+                this.selectedConfig = '';
+                this.selectedClientName = '';
+                this.amneziaLink = '';
+                setTimeout(() => {
+                    const canvas = document.getElementById('qrcode');
+                    if (canvas) canvas.innerHTML = '';
+                }, 0);
+            },
+
+            async editServerConfig(server) {
+                await this.withGlobalLoading(async () => {
+                    const response = await fetch(`/api/servers/${server.id}/config`, {
+                        headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.editingServerConfig = data.config;
+                        this.editingConfigServerId = server.id;
+                        this.showEditConfigModal = true;
+                    } else {
+                        this.error = 'Failed to load config';
+                    }
+                }, this.t('loading'));
+            },
+
+            async saveServerConfig() {
+                await this.withGlobalLoading(async () => {
+                    const response = await fetch(`/api/servers/${this.editingConfigServerId}/config`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${this.getToken()}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ config: this.editingServerConfig })
+                    });
+                    if (response.ok) {
+                        this.success = 'Config updated successfully';
+                        this.showEditConfigModal = false;
+                    } else {
+                        const error = await response.json();
+                        this.error = error.detail || 'Failed to update config';
+                    }
+                }, this.t('saving'));
+            },
+
+            showGlobalLoading(message = 'Loading...') {
+                this.globalLoading = true;
+                this.loadingMessage = message;
+            },
+
+            hideGlobalLoading() {
+                this.globalLoading = false;
+                this.loadingMessage = '';
+            },
+
+            async withGlobalLoading(callback, message = 'Loading...') {
+                try {
+                    this.showGlobalLoading(message);
+                    await callback();
+                } finally {
+                    this.hideGlobalLoading();
+                }
+            },
+
+            async loadServersIfNeeded() {
+                if (!this.serversLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.fetchServers();
+                        this.serversLoaded = true;
+                    }, this.t('loading_servers'));
+                }
+            },
+
+            async loadUsersIfNeeded() {
+                if (!this.usersLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.fetchUsers();
+                        this.usersLoaded = true;
+                    }, this.t('loading_users'));
+                }
+            },
+
+            async loadClientsIfNeeded() {
+                if (!this.clientsLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.loadAllData();
+                        await this.fetchUsers();
+                        this.clientsLoaded = true;
+                    }, this.t('loading_clients'));
+                }
+            },
+
+            async loadDashboardStatsIfNeeded() {
+                if (!this.dashboardStatsLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.loadDashboardStats();
+                        this.dashboardStatsLoaded = true;
+                    }, this.t('loading_dashboard'));
+                }
+            },
+
+            async loadMetricsIfNeeded() {
+                if (!this.metricsLoaded) {
+                    await this.withGlobalLoading(async () => {
+                        await this.loadMetrics();
+                        this.metricsLoaded = true;
+                    }, this.t('loading_metrics'));
+                }
+            },
+
+            async showIpHistory(clientId) {
+                await this.withGlobalLoading(async () => {
+                    try {
+                        const response = await fetch(`/api/clients/${clientId}/ip-history`, {
+                            headers: { 'Authorization': `Bearer ${this.getToken()}` }
+                        });
+                        if (response.ok) {
+                            this.ipHistory = await response.json();
+                            const client = this.clients.find(c => c.id === clientId);
+                            this.selectedClientName = client?.name || 'Unknown';
+                            this.showIpHistoryModal = true;
+                        } else {
+                            this.error = 'Failed to load IP history';
+                        }
+                    } catch (err) {
+                        this.error = 'Failed to load IP history';
+                    }
+                }, 'Loading IP history...');
             },
         };
     }

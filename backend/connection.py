@@ -108,7 +108,7 @@ class SSHConnection(Connection):
     async def _connect(self):
         if self._conn is not None:
             return
-        logger.info(f"Connecting to {self.username}@{self.host}:{self.port}")
+        logger.debug(f"Connecting to {self.username}@{self.host}:{self.port}")
         kwargs = {
             'host': self.host,
             'port': self.port,
@@ -131,7 +131,7 @@ class SSHConnection(Connection):
                 logger.debug("Using password authentication")
 
             self._conn = await asyncssh.connect(**kwargs)
-            logger.info("SSH connection established")
+            logger.debug("SSH connection established")
         except Exception as e:
             logger.error(f"SSH connection error: {e}")
             if temp_key_created and self._temp_key_path and os.path.exists(self._temp_key_path):
@@ -202,6 +202,6 @@ class SSHConnection(Connection):
         if self._conn:
             self._conn.close()
             await self._conn.wait_closed()
-            logger.info("SSH connection closed")
+            logger.debug("SSH connection closed")
         if self._temp_key_path and os.path.exists(self._temp_key_path):
             os.unlink(self._temp_key_path)
