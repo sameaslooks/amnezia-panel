@@ -3,6 +3,9 @@ services:
     build: ./backend
     container_name: amnezia-panel
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -27,6 +30,7 @@ services:
   postgres:
     image: postgres:15
     container_name: postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: amnezia
       POSTGRES_PASSWORD: YOUR-LONG-BIG-BOT_PASSWORD              # CHANGE THIS!
