@@ -344,9 +344,10 @@ AllowedIPs = {next_ip}
                 endpoint = stat.get('endpoint')
                 transfer = stat.get('transfer', '')
                 received, sent = awg_utils.parse_transfer(transfer)
+                handshake = stat.get('latest_handshake', 'Never')
                 if endpoint and ':' in endpoint:
                     endpoint = endpoint.split(':')[0]
-                await database.update_traffic(pub_key, received, sent, endpoint, self)
+                await database.update_traffic(pub_key, received, sent, endpoint, handshake, self)
 
     async def block_client(self, public_key: str) -> bool:
         ip = await self._get_client_ip(public_key)
