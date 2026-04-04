@@ -70,6 +70,7 @@ async def init_db():
                 is_deleted BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_handshake TEXT,
                 last_ip TEXT
             )
         ''')
@@ -340,7 +341,7 @@ async def get_user_traffic_stats(user_id: int, days: int = 30) -> Dict:
 
 # ---------- Клиенты ----------
 async def update_traffic(public_key: str, received: int, sent: int, endpoint: Optional[str] = None,
-                         server_instance=None):
+                         handshake: Optional[str] = None, server_instance=None):
     client = await get_client_by_public_key(public_key)
     if not client:
         return
@@ -372,6 +373,9 @@ async def update_traffic(public_key: str, received: int, sent: int, endpoint: Op
             await conn.execute('''
                 UPDATE users SET traffic_used_bytes = traffic_used_bytes + $1 WHERE id = $2
             ''', delta_received + delta_sent, user_id)
+            await conn.execute('''
+                UPDATE clients SET last_received = $1, last_sent = $2, last_handshake = $3 WHERE id = $4
+            ''', received, sent, handshake, client_id)
 
         await conn.execute('UPDATE clients SET last_received = $1, last_sent = $2 WHERE id = $3',
                            received, sent, client_id)
