@@ -849,20 +849,27 @@ async def login_page():
 @app.get("/admin")
 async def admin_page(request: Request):
     current_user = await get_current_user_optional(request)
-    if not current_user:
-        return FileResponse("/frontend/login.html")
-    if current_user.get("role") == "admin":
-        return FileResponse("/frontend/admin.html")
-    return RedirectResponse(url="/user-blocked")
+    if current_user and current_user.get("role") == "admin":
+        response = FileResponse("/frontend/admin.html")
+    elif current_user:
+        response = RedirectResponse(url="/user-blocked", status_code=302)
+    else:
+        response = RedirectResponse(url="/login", status_code=302)
+    # Запрещаем кеширование, чтобы избежать зацикливания
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    return response
 
 @app.get("/user")
 async def user_page(request: Request):
     current_user = await get_current_user_optional(request)
-    if not current_user:
-        return FileResponse("/frontend/login.html")
-    if current_user.get("role") == "user":
-        return FileResponse("/frontend/user.html")
-    return RedirectResponse(url="/user-blocked")
+    if current_user and current_user.get("role") == "user":
+        response = FileResponse("/frontend/user.html")
+    elif current_user:
+        response = RedirectResponse(url="/user-blocked", status_code=302)
+    else:
+        response = RedirectResponse(url="/login", status_code=302)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    return response
 
 
 @app.get("/users")
