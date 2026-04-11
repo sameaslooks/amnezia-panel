@@ -288,6 +288,20 @@
     </div>
 
     <script>
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        if (response.status === 401) {
+            // Очищаем локальное хранилище
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            localStorage.removeItem('username');
+            // Редирект на страницу входа
+            window.location.href = '/login';
+            throw new Error('Unauthorized');
+        }
+        return response;
+    };
     function userPanel() {
         return {
             // Данные

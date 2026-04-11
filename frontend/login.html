@@ -10,15 +10,28 @@
 </head>
 <body class="bg-gray-100">
     <script>
-        const token = localStorage.getItem('token');
-        const role = localStorage.getItem('role');
-        if (token && role) {
-            if (role === 'admin') {
-                window.location.replace('/admin');
-            } else {
-                window.location.replace('/user');
+        (async function() {
+            const token = localStorage.getItem('token');
+            const role = localStorage.getItem('role');
+            if (!token || !role) return;
+            try {
+                const response = await fetch('/api/verify-token', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    if (role === 'admin') window.location.replace('/admin');
+                    else window.location.replace('/user');
+                } else {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('role');
+                    localStorage.removeItem('username');
+                }
+            } catch (err) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('role');
+                localStorage.removeItem('username');
             }
-        }
+        })();
     </script>
     <div class="min-h-screen flex items-center justify-center" x-data="loginForm()">
         <div class="bg-white p-8 rounded-lg shadow-md w-96">

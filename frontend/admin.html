@@ -1084,6 +1084,18 @@
     </div>
 
     <script>
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            localStorage.removeItem('username');
+            window.location.href = '/login';
+            throw new Error('Unauthorized');
+        }
+        return response;
+    };
     function adminPanel() {
         return {
             // State
@@ -1423,7 +1435,7 @@
                     last_ip: 'Last IP',
                 }
             },
-
+            
             getToken() { return localStorage.getItem('token'); },
 
             t(key) {
@@ -1448,7 +1460,7 @@
                 this.language = lang;
                 localStorage.setItem('language', lang);
             },
-
+            
             async init() {
                 const token = this.getToken();
                 const role = localStorage.getItem('role');
