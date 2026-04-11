@@ -10,15 +10,28 @@
 </head>
 <body class="bg-gray-100">
     <script>
-        const token = localStorage.getItem('token');
-        const role = localStorage.getItem('role');
-        if (token && role) {
-            if (role === 'admin') {
-                window.location.replace('/admin');
-            } else {
-                window.location.replace('/user');
+        (async function() {
+            const token = localStorage.getItem('token');
+            const role = localStorage.getItem('role');
+            if (!token || !role) return;
+            try {
+                const response = await fetch('/api/verify-token', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    if (role === 'admin') window.location.replace('/admin');
+                    else window.location.replace('/user');
+                } else {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('role');
+                    localStorage.removeItem('username');
+                }
+            } catch (err) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('role');
+                localStorage.removeItem('username');
             }
-        }
+        })();
     </script>
     <div class="min-h-screen flex items-center justify-center" x-data="loginForm()">
         <div class="bg-white p-8 rounded-lg shadow-md w-96">
@@ -54,41 +67,10 @@
     </div>
 
     <script>
-        // ========== Глобальная проверка токена при загрузке ==========
-        (async function() {
-            const token = localStorage.getItem('token');
-            const role = localStorage.getItem('role');
-            if (!token || !role) return;
-            
-            try {
-                const response = await fetch('/api/verify-token', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    if (role === 'admin') {
-                        window.location.replace('/admin');
-                    } else {
-                        window.location.replace('/user');
-                    }
-                } else {
-                    // Токен невалиден – очищаем
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('role');
-                    localStorage.removeItem('username');
-                }
-            } catch (err) {
-                console.error('Token check failed:', err);
-                localStorage.removeItem('token');
-                localStorage.removeItem('role');
-                localStorage.removeItem('username');
-            }
-        })();
-        // =====================================================
-
         function loginForm() {
             return {
-                username: new URLSearchParams(window.location.search).get('username') || '',
-                password: new URLSearchParams(window.location.search).get('password') || '',
+                username: '',
+                password: '',
                 error: '',
                 loading: false,
 
@@ -98,8 +80,13 @@
 
                     fetch('/api/login', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username: this.username, password: this.password })
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            username: this.username,
+                            password: this.password
+                        })
                     })
                     .then(res => res.json())
                     .then(data => {
@@ -107,17 +94,18 @@
                             localStorage.setItem('token', data.access_token);
                             localStorage.setItem('role', data.role);
                             localStorage.setItem('username', this.username);
+
                             if (data.role === 'admin') {
                                 window.location.href = '/admin';
                             } else {
                                 window.location.href = '/user';
                             }
                         } else {
-                            this.error = data.detail || 'Неверный логин или пароль';
+                            this.error = data.detail || 'Login failed';
                         }
                     })
                     .catch(err => {
-                        this.error = 'Ошибка соединения';
+                        this.error = 'Connection error';
                     })
                     .finally(() => {
                         this.loading = false;
