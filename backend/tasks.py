@@ -1,4 +1,3 @@
-# tasks.py
 import asyncio
 from logger import logger
 import database as db
@@ -7,13 +6,23 @@ from awg_manager import AmneziaWGServer
 
 async def check_limits_and_sync_all_servers(servers_list):
     """
-    Проверяет лимиты всех пользователей и деактивирует клиентов на всех серверах при превышении.
+    Проверяет лимиты всех пользователей и синхронизирует состояние клиентов:
+    - Деактивирует клиентов, если превышен трафик, истёк срок или пользователь отключён.
+    - Активирует клиентов, если все лимиты в норме и пользователь не отключён.
     """
     exceeded_traffic = await db.get_users_exceeded_traffic()
     expired = await db.get_users_expired()
     problem_users = set(exceeded_traffic + expired)
-    if not problem_users:
-        return
+
+    all_users = await db.get_all_users()
+    ok_users = set()
+    for u in all_users:
+        if u['id'] in problem_users:
+            continue
+        if u.get('is_disabled'):
+            problem_users.add(u['id'])
+            continue
+        ok_users.add(u['id'])
 
     server_instances = {}
     for srv in servers_list:
@@ -38,22 +47,39 @@ async def check_limits_and_sync_all_servers(servers_list):
             if conn:
                 await conn.close()
 
-    for user_id in problem_users:
-        clients_by_server = await db.get_user_clients_grouped_by_server(user_id)
-        for server_id, clients in clients_by_server.items():
-            server = server_instances.get(server_id)
-            if not server:
-                continue
-            for client in clients:
-                if client['is_active']:
-                    await server.block_client(client['public_key'])
-                    await db.deactivate_client(client['id'])
-        logger.info(f"Deactivated all clients for user {user_id} due to limits")
+    try:
+        for user_id in problem_users:
+            clients_by_server = await db.get_user_clients_grouped_by_server(user_id)
+            for server_id, clients in clients_by_server.items():
+                server = server_instances.get(server_id)
+                if not server:
+                    continue
+                for client in clients:
+                    if client['is_active']:
+                        await server.block_client(client['public_key'])
+                        await db.deactivate_client(client['id'])
+            logger.info(f"Deactivated clients for user {user_id} due to limits/disabled")
 
-    for server in server_instances.values():
-        await server.conn.close()
+        for user_id in ok_users:
+            clients_by_server = await db.get_user_clients_grouped_by_server(user_id)
+            for server_id, clients in clients_by_server.items():
+                server = server_instances.get(server_id)
+                if not server:
+                    continue
+                for client in clients:
+                    if not client['is_active']:
+                        await server.unblock_client(client['public_key'])
+                        await db.activate_client(client['public_key'])
+            if clients_by_server:  # логируем только если были клиенты
+                logger.info(f"Activated clients for user {user_id} (limits OK)")
+
+    finally:
+        for server in server_instances.values():
+            await server.conn.close()
+
 
 async def collect_stats_periodically(interval: int = 60):
+    """Периодически собирает трафик и синхронизирует лимиты."""
     while True:
         logger.debug("Starting periodic stats collection")
         try:
