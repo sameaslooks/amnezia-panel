@@ -4,44 +4,94 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Amnezia Panel - User</title>
+    <title>Amnezia Panel</title>
     <link href="/static/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
     <style>
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+        :root {
+            --bg-primary: #ffffff; --bg-secondary: #f9fafb;
+            --text-primary: #1f2937; --text-muted: #6b7280;
+            --border: #e5e7eb; --accent: #3b82f6;
+            --font-base: 'Inter', system-ui, sans-serif;
         }
-        .animate-pulse {
-            animation: pulse 1.5s ease-in-out infinite;
+        .dark {
+            --bg-primary: #0f172a; --bg-secondary: #1e293b;
+            --text-primary: #f1f5f9; --text-muted: #94a3b8; --border: #334155;
         }
+        body { font-family: var(--font-base); background-color: var(--bg-secondary); color: var(--text-primary); }
+        .bg-white { background-color: var(--bg-primary) !important; }
+        .bg-gray-50, .bg-gray-100 { background-color: var(--bg-secondary) !important; }
+        .text-gray-800, .text-gray-900 { color: var(--text-primary) !important; }
+        .text-gray-600, .text-gray-500 { color: var(--text-muted) !important; }
+        .border-gray-200 { border-color: var(--border) !important; }
+        .dark input, .dark textarea, .dark select { background-color: #1e293b; color: #f1f5f9; border-color: #334155; }
+
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+        .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+
+        /* Sidebar */
+        .ap-sidebar { width: 216px; min-width: 216px; background: #0f172a; display: flex; flex-direction: column; }
+        .ap-logo { padding: 20px 16px 16px; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 10px; }
+        .ap-logo-icon { width: 30px; height: 30px; background: var(--accent); border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .ap-logo-icon svg { width: 16px; height: 16px; }
+        .ap-logo-name { font-size: 14px; font-weight: 600; color: #f1f5f9; }
+        .ap-nav { flex: 1; padding: 6px 0; }
+        .ap-nav-label { padding: 12px 16px 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: #475569; }
+        .ap-nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 12px; cursor: pointer; border-radius: 6px; margin: 1px 8px; color: #94a3b8; font-size: 13.5px; transition: background .12s, color .12s; user-select: none; }
+        .ap-nav-item:hover { background: rgba(255,255,255,.06); color: #e2e8f0; }
+        .ap-nav-item.active { background: rgba(59,130,246,.14); color: #93c5fd; }
+        .ap-nav-item svg { width: 15px; height: 15px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.5; }
+        .ap-sidebar-footer { padding: 10px 10px 12px; border-top: 1px solid rgba(255,255,255,.07); }
+        .ap-user-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px 4px; }
+        .ap-user-avatar { width: 26px; height: 26px; border-radius: 50%; background: rgba(59,130,246,.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .ap-user-avatar svg { width: 13px; height: 13px; fill: none; stroke: #93c5fd; stroke-width: 1.5; }
+        .ap-user-name { font-size: 12.5px; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ap-logout-btn { width: 100%; padding: 7px 10px; border-radius: 6px; background: rgba(239,68,68,.12); color: #fca5a5; border: 1px solid rgba(239,68,68,.18); font-size: 12.5px; cursor: pointer; font-family: var(--font-base); display: flex; align-items: center; justify-content: center; gap: 6px; transition: background .12s; }
+        .ap-logout-btn:hover { background: rgba(239,68,68,.22); color: #fecaca; }
+        .ap-logout-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+        .powered-by { font-size: 10px; color: #475569; text-align: center; opacity: .7; margin-top: 10px; }
+        .powered-by a { color: #475569; text-decoration: none; }
+        .powered-by a:hover { opacity: .85; }
     </style>
 </head>
 <body class="bg-gray-100">
     <div class="min-h-screen flex" x-data="userPanel()" x-init="init()">
-        <!-- Sidebar (как в админке) -->
-        <div class="w-64 bg-gray-800 text-white flex flex-col">
-            <div class="p-5 text-xl font-bold border-b border-gray-700">Amnezia VPN</div>
-            <nav class="flex-1 mt-5">
-                <a href="#" @click.prevent="activeTab = 'dashboard'"
-                   class="block px-5 py-3 hover:bg-gray-700 transition"
-                   :class="{'bg-gray-900': activeTab === 'dashboard'}">
-                    📊 Dashboard
-                </a>
-                <a href="#" @click.prevent="activeTab = 'clients'"
-                   class="block px-5 py-3 hover:bg-gray-700 transition"
-                   :class="{'bg-gray-900': activeTab === 'clients'}">
-                    📱 My Clients
-                </a>
+        <!-- Sidebar -->
+        <aside class="ap-sidebar">
+            <div class="ap-logo">
+                <div class="ap-logo-icon">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="white" stroke-width="1.5"><path d="M10 2L4 5v5c0 4.4 2.6 8.2 6 9 3.4-.8 6-4.6 6-9V5l-6-3z"/></svg>
+                </div>
+                <span class="ap-logo-name">Amnezia Panel</span>
+            </div>
+            <nav class="ap-nav">
+                <div class="ap-nav-label">Overview</div>
+                <div class="ap-nav-item" :class="{'active': activeTab === 'dashboard'}" @click="activeTab = 'dashboard'">
+                    <svg viewBox="0 0 20 20"><path d="M10 2L2 8v10h5v-5h6v5h5V8L10 2z"/></svg>
+                    <span>Dashboard</span>
+                </div>
+                <div class="ap-nav-label">VPN</div>
+                <div class="ap-nav-item" :class="{'active': activeTab === 'clients'}" @click="activeTab = 'clients'">
+                    <svg viewBox="0 0 20 20"><circle cx="8" cy="10" r="4"/><path d="M11.3 10h6.7v2h-2v2h-2v-2h-2.7" stroke-linejoin="round"/></svg>
+                    <span>My Configs</span>
+                </div>
             </nav>
-            <div class="p-5 border-t border-gray-700">
-                <div class="text-sm text-gray-400 mb-2" x-text="profile.username"></div>
-                <button @click="logout" class="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition">
+            <div class="ap-sidebar-footer">
+                <div class="ap-user-row">
+                    <div class="ap-user-avatar">
+                        <svg viewBox="0 0 20 20"><circle cx="10" cy="7" r="3"/><path d="M3 17c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>
+                    </div>
+                    <span class="ap-user-name" x-text="profile.username"></span>
+                </div>
+                <button @click="logout" class="ap-logout-btn">
+                    <svg viewBox="0 0 20 20"><path d="M8 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round"/><path d="M13 14l4-4-4-4M17 10H8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Logout
                 </button>
+                <div class="powered-by">Powered by Noxum Public · <a href="https://lolz.team/threads/10302952/" target="_blank" rel="noopener">lolz.team</a> · <a href="https://t.me/looksaboutthis" target="_blank" rel="noopener">Telegram</a></div>
             </div>
-        </div>
+        </aside>
 
         <!-- Main Content -->
         <div class="flex-1 overflow-auto p-6">

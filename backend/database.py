@@ -1,4 +1,6 @@
-# database.py
+# Amnezia VPN Panel — database.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 import asyncpg # type: ignore
 import os
 import json
@@ -123,6 +125,11 @@ async def init_db():
             await conn.execute('ALTER TABLE clients ADD COLUMN IF NOT EXISTS last_ip TEXT')
         except Exception as e:
             logger.warning(f"Adding last_ip column: {e}")
+
+        try:
+            await conn.execute("ALTER TABLE servers ADD COLUMN IF NOT EXISTS awg_version TEXT DEFAULT 'awg3'")
+        except Exception as e:
+            logger.warning(f"Adding awg_version column: {e}")
 
         try:
             await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN DEFAULT FALSE')
@@ -434,11 +441,11 @@ async def activate_client(public_key: str):
         logger.info(f"Activated client {public_key[:8]}...")
 
 
-async def deactivate_client(client_id: int):
+async def deactivate_client(public_key: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute('UPDATE clients SET is_active = FALSE WHERE id = $1', client_id)
-        logger.info(f"Client {client_id} deactivated")
+        await conn.execute('UPDATE clients SET is_active = FALSE WHERE public_key = $1', public_key)
+        logger.info(f"Deactivated client {public_key[:8]}...")
 
 
 async def reset_traffic(public_key: str):
@@ -843,7 +850,7 @@ async def sync_user_limits_across_servers(user_id: int, server_instances: Dict[i
                 await activate_client(client['public_key'])
             else:
                 await server.block_client(client['public_key'])
-                await deactivate_client(client['id'])
+                await deactivate_client(client['public_key'])
     logger.info(f"Synced user {user_id} across servers, limits ok: {ok}")
 
 

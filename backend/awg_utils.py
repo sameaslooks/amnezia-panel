@@ -26,6 +26,16 @@ def parse_server_config(config_text: str) -> Dict[str, str]:
         'h3': r'H3\s*=\s*(\S+)',
         'h4': r'H4\s*=\s*(\S+)',
         'i1': r'I1\s*=\s*(.*)',
+        # AWG 3.x
+        'header_protection_key': r'HeaderProtectionKey\s*=\s*(\S+)',
+        'content_padding_addition': r'ContentPaddingAddition\s*=\s*(\S+)',
+        'rekey_after_time': r'RekeyAfterTime\s*=\s*(\S+)',
+        'rekey_timeout': r'RekeyTimeout\s*=\s*(\S+)',
+        'reject_after_time': r'RejectAfterTime\s*=\s*(\S+)',
+        'keepalive_timeout': r'KeepaliveTimeout\s*=\s*(\S+)',
+        'max_handshake_attempts': r'MaxHandshakeAttempts\s*=\s*(\S+)',
+        'random_trailers': r'RandomTrailers\s*=\s*(\S+)',
+        'disable_cookies': r'DisableCookies\s*=\s*(\S+)',
     }
     for key, pattern in patterns.items():
         match = re.search(pattern, config_text)
@@ -135,6 +145,22 @@ def generate_client_config(
             lines.append(f'{key} = {val}')
     if obfuscation_params.get('i1'):
         lines.append(f'I1 = {obfuscation_params["i1"]}')
+    # AWG 3.x params
+    v3_map = [
+        ('header_protection_key', 'HeaderProtectionKey'),
+        ('content_padding_addition', 'ContentPaddingAddition'),
+        ('rekey_after_time', 'RekeyAfterTime'),
+        ('rekey_timeout', 'RekeyTimeout'),
+        ('reject_after_time', 'RejectAfterTime'),
+        ('keepalive_timeout', 'KeepaliveTimeout'),
+        ('max_handshake_attempts', 'MaxHandshakeAttempts'),
+        ('random_trailers', 'RandomTrailers'),
+        ('disable_cookies', 'DisableCookies'),
+    ]
+    for param_key, conf_key in v3_map:
+        val = obfuscation_params.get(param_key)
+        if val:
+            lines.append(f'{conf_key} = {val}')
     lines.append('')
     lines.extend([
         '[Peer]',
@@ -154,7 +180,8 @@ def generate_amnezia_vpn_link(
     server_params: Dict[str, str],
     client: Dict[str, str],
     obfuscation: Dict[str, str],
-    server_name: str = ""
+    server_name: str = "",
+    container_name: str = "amnezia-awg3"
 ) -> str:
     """Генерирует ссылку вида vpn://... для AmneziaVPN."""
     inner_config = generate_client_config(
@@ -165,6 +192,9 @@ def generate_amnezia_vpn_link(
         psk=client.get('psk', ''),
         **obfuscation
     )
+
+    is_v3 = bool(obfuscation.get('header_protection_key'))
+    protocol_version = "3" if is_v3 else "2"
 
     last_config = {
         "H1": obfuscation.get('h1', ''),
@@ -196,44 +226,63 @@ def generate_amnezia_vpn_link(
         "psk_key": client.get('psk', ''),
         "server_pub_key": server_params['public_key'],
     }
+    if is_v3:
+        last_config["HeaderProtectionKey"] = obfuscation.get('header_protection_key', '')
+        last_config["ContentPaddingAddition"] = obfuscation.get('content_padding_addition', '')
+        last_config["RekeyAfterTime"] = obfuscation.get('rekey_after_time', '')
+        last_config["RekeyTimeout"] = obfuscation.get('rekey_timeout', '')
+        last_config["RejectAfterTime"] = obfuscation.get('reject_after_time', '')
+        last_config["KeepaliveTimeout"] = obfuscation.get('keepalive_timeout', '')
+        last_config["MaxHandshakeAttempts"] = obfuscation.get('max_handshake_attempts', '')
+        last_config["RandomTrailers"] = obfuscation.get('random_trailers', '')
+        last_config["DisableCookies"] = obfuscation.get('disable_cookies', '')
 
     last_config_str = json.dumps(last_config, indent=4, separators=(',', ': '), ensure_ascii=False)
 
-    if server_name:
-        description = f"{server_name}"
-    else:
-        description = "Amnezia VPN Server"
+    description = server_name if server_name else "Amnezia VPN Server"
+
+    awg_section = {
+        "H1": obfuscation.get('h1', ''),
+        "H2": obfuscation.get('h2', ''),
+        "H3": obfuscation.get('h3', ''),
+        "H4": obfuscation.get('h4', ''),
+        "I1": obfuscation.get('i1', ''),
+        "I2": "",
+        "I3": "",
+        "I4": "",
+        "I5": "",
+        "Jc": obfuscation.get('jc', '5'),
+        "Jmax": obfuscation.get('jmax', '50'),
+        "Jmin": obfuscation.get('jmin', '10'),
+        "S1": obfuscation.get('s1', '95'),
+        "S2": obfuscation.get('s2', '21'),
+        "S3": obfuscation.get('s3', '6'),
+        "S4": obfuscation.get('s4', '10'),
+        "last_config": last_config_str,
+        "port": server_params['port'],
+        "protocol_version": protocol_version,
+        "subnet_address": "10.8.1.0",
+        "transport_proto": "udp",
+    }
+    if is_v3:
+        awg_section["HeaderProtectionKey"] = obfuscation.get('header_protection_key', '')
+        awg_section["ContentPaddingAddition"] = obfuscation.get('content_padding_addition', '')
+        awg_section["RekeyAfterTime"] = obfuscation.get('rekey_after_time', '')
+        awg_section["RekeyTimeout"] = obfuscation.get('rekey_timeout', '')
+        awg_section["RejectAfterTime"] = obfuscation.get('reject_after_time', '')
+        awg_section["KeepaliveTimeout"] = obfuscation.get('keepalive_timeout', '')
+        awg_section["MaxHandshakeAttempts"] = obfuscation.get('max_handshake_attempts', '')
+        awg_section["RandomTrailers"] = obfuscation.get('random_trailers', '')
+        awg_section["DisableCookies"] = obfuscation.get('disable_cookies', '')
 
     server_config = {
         "containers": [
             {
-                "awg": {
-                    "H1": obfuscation.get('h1', ''),
-                    "H2": obfuscation.get('h2', ''),
-                    "H3": obfuscation.get('h3', ''),
-                    "H4": obfuscation.get('h4', ''),
-                    "I1": obfuscation.get('i1', ''),
-                    "I2": "",
-                    "I3": "",
-                    "I4": "",
-                    "I5": "",
-                    "Jc": obfuscation.get('jc', '5'),
-                    "Jmax": obfuscation.get('jmax', '50'),
-                    "Jmin": obfuscation.get('jmin', '10'),
-                    "S1": obfuscation.get('s1', '95'),
-                    "S2": obfuscation.get('s2', '21'),
-                    "S3": obfuscation.get('s3', '6'),
-                    "S4": obfuscation.get('s4', '10'),
-                    "last_config": last_config_str,
-                    "port": server_params['port'],
-                    "protocol_version": "2",
-                    "subnet_address": "10.8.1.0",
-                    "transport_proto": "udp",
-                },
-                "container": "amnezia-awg2",
+                "awg": awg_section,
+                "container": container_name,
             }
         ],
-        "defaultContainer": "amnezia-awg2",
+        "defaultContainer": container_name,
         "description": description,
         "dns1": "172.17.0.1",
         "dns2": "1.1.1.1",

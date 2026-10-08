@@ -1,4 +1,6 @@
-# stats.py
+# Amnezia VPN Panel — stats.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import database as db

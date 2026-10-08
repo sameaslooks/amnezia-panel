@@ -1,4 +1,6 @@
-# auth.py
+# Amnezia VPN Panel — auth.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 import jwt
 import os
 from datetime import datetime, timedelta

@@ -1,3 +1,6 @@
+# Amnezia VPN Panel — tasks.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 import asyncio
 from logger import logger
 import database as db
@@ -41,7 +44,7 @@ async def check_limits_and_sync_all_servers(servers_list):
                     private_key=srv.get('private_key'),
                     sudo_password=srv.get('password')
                 )
-            server_instances[srv['id']] = AmneziaWGServer(conn, server_id=srv['id'])
+            server_instances[srv['id']] = AmneziaWGServer(conn, server_id=srv['id'], awg_version=srv.get('awg_version', 'awg3'))
         except Exception as e:
             logger.error(f"Failed to create server instance for {srv['id']}: {e}")
             if conn:
@@ -57,7 +60,7 @@ async def check_limits_and_sync_all_servers(servers_list):
                 for client in clients:
                     if client['is_active']:
                         await server.block_client(client['public_key'])
-                        await db.deactivate_client(client['id'])
+                        await db.deactivate_client(client['public_key'])
             logger.info(f"Deactivated clients for user {user_id} due to limits/disabled")
 
         for user_id in ok_users:
@@ -100,7 +103,7 @@ async def collect_stats_periodically(interval: int = 60):
                             private_key=srv.get('private_key'),
                             sudo_password=srv.get('password')
                         )
-                    server = AmneziaWGServer(conn, server_id=srv['id'])
+                    server = AmneziaWGServer(conn, server_id=srv['id'], awg_version=srv.get('awg_version', 'awg3'))
                     await server.collect_traffic_stats()
                 except Exception as e:
                     logger.error(f"Stats collection failed for server {srv['id']}: {e}", exc_info=True)

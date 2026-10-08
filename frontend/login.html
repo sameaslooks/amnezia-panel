@@ -4,66 +4,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Amnezia Panel - Login</title>
+    <title>Amnezia Panel</title>
     <link href="/static/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
     <script src="/static/alpine.min.js" defer></script>
+    <style>
+        :root { --accent: #3b82f6; --font: 'Inter', system-ui, sans-serif; }
+        body { font-family: var(--font); }
+        .login-card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+            padding: 36px 32px;
+            width: 360px;
+        }
+        .login-logo {
+            width: 44px; height: 44px;
+            background: var(--accent);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 16px;
+        }
+        .login-logo svg { width: 22px; height: 22px; fill: none; stroke: white; stroke-width: 1.5; }
+        .login-title { font-size: 18px; font-weight: 600; color: #111827; text-align: center; margin-bottom: 4px; }
+        .login-sub   { font-size: 13px; color: #6b7280; text-align: center; margin-bottom: 24px; }
+        .field-label { display: block; font-size: 12.5px; font-weight: 500; color: #374151; margin-bottom: 5px; }
+        .field-input {
+            width: 100%; padding: 9px 12px;
+            border: 1px solid #d1d5db; border-radius: 7px;
+            font-size: 14px; font-family: var(--font);
+            color: #111827; background: #fff;
+            outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+            box-sizing: border-box;
+        }
+        .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+        .login-btn {
+            width: 100%; padding: 9px;
+            background: var(--accent); color: #fff;
+            border: none; border-radius: 7px;
+            font-size: 14px; font-weight: 500;
+            font-family: var(--font); cursor: pointer;
+            transition: background 0.15s, opacity 0.15s;
+            margin-top: 4px;
+        }
+        .login-btn:hover:not(:disabled) { background: #2563eb; }
+        .login-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+        .error-box {
+            background: #fef2f2; border: 1px solid #fecaca;
+            color: #b91c1c; font-size: 13px;
+            border-radius: 7px; padding: 9px 12px; margin-bottom: 16px;
+        }
+        .powered-by-auth {
+            font-size: 10px; color: #9ca3af; text-align: center; opacity: .75;
+            position: absolute; bottom: 16px; left: 0; right: 0;
+        }
+        .powered-by-auth a { color: #9ca3af; text-decoration: none; }
+        .powered-by-auth a:hover { opacity: .85; }
+    </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gray-100 min-h-screen flex items-center justify-center" style="position:relative;">
     <script>
         (async function() {
             const token = localStorage.getItem('token');
-            const role = localStorage.getItem('role');
+            const role  = localStorage.getItem('role');
             if (!token || !role) return;
             try {
-                const response = await fetch('/api/verify-token', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    if (role === 'admin') window.location.replace('/admin');
-                    else window.location.replace('/user');
+                const r = await fetch('/api/verify-token', { headers: { Authorization: `Bearer ${token}` } });
+                if (r.ok) {
+                    window.location.replace(role === 'admin' ? '/admin' : '/user');
                 } else {
                     localStorage.removeItem('token');
                     localStorage.removeItem('role');
                     localStorage.removeItem('username');
                 }
-            } catch (err) {
-                localStorage.removeItem('token');
-                localStorage.removeItem('role');
-                localStorage.removeItem('username');
-            }
+            } catch { localStorage.clear(); }
         })();
     </script>
-    <div class="min-h-screen flex items-center justify-center" x-data="loginForm()">
-        <div class="bg-white p-8 rounded-lg shadow-md w-96">
-            <h1 class="text-2xl font-bold mb-6 text-center">Amnezia VPN Panel</h1>
 
-            <div x-show="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                <span x-text="error"></span>
-            </div>
-
-            <form @submit.prevent="login">
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Username</label>
-                    <input type="text" x-model="username"
-                           class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                           required>
-                </div>
-
-                <div class="mb-6">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Password</label>
-                    <input type="password" x-model="password"
-                           class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
-                           required>
-                </div>
-
-                <button type="submit"
-                        class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded hover:bg-blue-600 transition"
-                        :disabled="loading">
-                    <span x-show="!loading">Login</span>
-                    <span x-show="loading">Loading...</span>
-                </button>
-            </form>
+    <div class="login-card" x-data="loginForm()">
+        <div class="login-logo">
+            <svg viewBox="0 0 20 20"><path d="M10 2L4 5v5c0 4.4 2.6 8.2 6 9 3.4-.8 6-4.6 6-9V5l-6-3z"/></svg>
         </div>
+        <div class="login-title">Amnezia Panel</div>
+        <div class="login-sub">Sign in to manage your VPN</div>
+
+        <div x-show="error" class="error-box" x-text="error"></div>
+
+        <form @submit.prevent="login" style="display:flex;flex-direction:column;gap:14px;">
+            <div>
+                <label class="field-label">Username</label>
+                <input type="text" x-model="username" class="field-input" autocomplete="username" required>
+            </div>
+            <div>
+                <label class="field-label">Password</label>
+                <input type="password" x-model="password" class="field-input" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="login-btn" :disabled="loading">
+                <span x-show="!loading">Sign in</span>
+                <span x-show="loading">Signing in…</span>
+            </button>
+        </form>
     </div>
 
     <script>
@@ -73,46 +113,31 @@
                 password: '',
                 error: '',
                 loading: false,
-
                 login() {
                     this.loading = true;
                     this.error = '';
-
                     fetch('/api/login', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            username: this.username,
-                            password: this.password
-                        })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: this.username, password: this.password })
                     })
-                    .then(res => res.json())
+                    .then(r => r.json())
                     .then(data => {
                         if (data.access_token) {
                             localStorage.setItem('token', data.access_token);
                             localStorage.setItem('role', data.role);
                             localStorage.setItem('username', this.username);
-
-                            if (data.role === 'admin') {
-                                window.location.href = '/admin';
-                            } else {
-                                window.location.href = '/user';
-                            }
+                            window.location.href = data.role === 'admin' ? '/admin' : '/user';
                         } else {
                             this.error = data.detail || 'Login failed';
                         }
                     })
-                    .catch(err => {
-                        this.error = 'Connection error';
-                    })
-                    .finally(() => {
-                        this.loading = false;
-                    });
+                    .catch(() => { this.error = 'Connection error'; })
+                    .finally(() => { this.loading = false; });
                 }
-            }
+            };
         }
     </script>
+<div class="powered-by-auth">Powered by Noxum Public · <a href="https://lolz.team/threads/10302952/" target="_blank" rel="noopener">lolz.team</a> · <a href="https://t.me/looksaboutthis" target="_blank" rel="noopener">Telegram</a></div>
 </body>
 </html>

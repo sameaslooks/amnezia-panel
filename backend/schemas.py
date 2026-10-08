@@ -44,6 +44,7 @@ class ServerCreate(BaseModel):
     auth_type: str = "local"
     password: Optional[str] = None
     private_key: Optional[str] = None
+    awg_version: str = "awg3"
 
 
 class ServerUpdate(BaseModel):
@@ -55,6 +56,7 @@ class ServerUpdate(BaseModel):
     password: Optional[str] = None
     private_key: Optional[str] = None
     is_active: Optional[bool] = None
+    awg_version: Optional[str] = None
 
 
 class ServerStatusItem(BaseModel):

@@ -1,4 +1,6 @@
-# awg_manager.py
+# Amnezia VPN Panel — awg_manager.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 from typing import List, Dict, Optional
 import re
 from datetime import datetime
@@ -13,11 +15,14 @@ _stats_collect_lock = asyncio.Lock()
 class AmneziaWGServer:
     """Основной класс для управления сервером AmneziaWG."""
 
-    def __init__(self, conn: Connection, server_id: int = 1):
+    def __init__(self, conn: Connection, server_id: int = 1, awg_version: str = 'awg3'):
         self.conn = conn
         self.server_id = server_id
-        self.container_name = "amnezia-awg2"
-        logger.debug(f"AmneziaWGServer initialized for server ID {server_id}")
+        self.awg_version = awg_version
+        self.container_name = f"amnezia-{awg_version}"
+        if hasattr(conn, 'container_name'):
+            conn.container_name = self.container_name
+        logger.debug(f"AmneziaWGServer initialized for server ID {server_id} (container: {self.container_name})")
 
     async def _read_config(self) -> str:
         config = await self.conn.run_command("cat /opt/amnezia/awg/awg0.conf 2>/dev/null || echo ''")
@@ -410,12 +415,19 @@ AllowedIPs = {next_ip}
             'ip': client_data['ip'],
             'psk': peer.get('psk', '')
         }
-        obfuscation = {k.lower(): v for k, v in server_params.items() if k.lower() in ['jc','jmin','jmax','s1','s2','s3','s4','h1','h2','h3','h4','i1']}
+        _obf_keys = {
+            'jc','jmin','jmax','s1','s2','s3','s4','h1','h2','h3','h4','i1',
+            'header_protection_key','content_padding_addition','rekey_after_time',
+            'rekey_timeout','reject_after_time','keepalive_timeout',
+            'max_handshake_attempts','random_trailers','disable_cookies',
+        }
+        obfuscation = {k.lower(): v for k, v in server_params.items() if k.lower() in _obf_keys}
         link = awg_utils.generate_amnezia_vpn_link(
             server_params={'host': host, 'port': port, 'public_key': server_public},
             client=client_dict,
             obfuscation=obfuscation,
-            server_name=server_name
+            server_name=server_name,
+            container_name=self.container_name
         )
         logger.debug(f"Amnezia link generated for {public_key[:8]}...")
         return link
@@ -428,7 +440,7 @@ AllowedIPs = {next_ip}
         if not isinstance(self.conn, SSHConnection):
             yield {"type": "error", "message": "Invalid connection type"}
             return
-        async for update in run_setup(self.conn, sudo_password):
+        async for update in run_setup(self.conn, sudo_password, awg_version=self.awg_version):
             yield update
 
     async def _get_server_ip(self) -> str:
@@ -523,13 +535,13 @@ AllowedIPs = {next_ip}
             await self.conn.run_command("echo 'ping'", in_container=False)
             status["online"] = True
             container_check = await self.conn.run_command(
-                "docker ps --filter name=amnezia-awg2 --format '{{.Status}}'",
+                f"docker ps --filter name={self.container_name} --format '{{{{.Status}}}}'",
                 in_container=False
             )
             if 'Up' in container_check:
                 status["container_running"] = True
                 version = await self.conn.run_command(
-                    "docker exec amnezia-awg2 awg version 2>/dev/null || echo 'unknown'",
+                    f"docker exec {self.container_name} awg version 2>/dev/null || echo 'unknown'",
                     in_container=False
                 )
                 status["version"] = version.strip()
@@ -545,7 +557,7 @@ AllowedIPs = {next_ip}
 
     async def stop_container(self) -> bool:
         try:
-            await self.conn.run_command("docker stop amnezia-awg2 2>/dev/null || true", in_container=False)
+            await self.conn.run_command(f"docker stop {self.container_name} 2>/dev/null || true", in_container=False)
             logger.info(f"Container stopped on server {self.server_id}")
             return True
         except Exception as e:
@@ -554,7 +566,7 @@ AllowedIPs = {next_ip}
 
     async def start_container(self) -> bool:
         try:
-            await self.conn.run_command("docker start amnezia-awg2 2>/dev/null || true", in_container=False)
+            await self.conn.run_command(f"docker start {self.container_name} 2>/dev/null || true", in_container=False)
             await asyncio.sleep(2)
             await self.sync_routes_with_db()
             logger.info(f"Container started on server {self.server_id}")

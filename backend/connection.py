@@ -1,4 +1,6 @@
-# connection.py
+# Amnezia VPN Panel — connection.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 import abc
 import asyncio
 import subprocess
@@ -31,7 +33,7 @@ class Connection(abc.ABC):
 class LocalConnection(Connection):
     """Подключение к локальному Docker-контейнеру."""
 
-    def __init__(self, container_name: str = "amnezia-awg2"):
+    def __init__(self, container_name: str = "amnezia-awg3"):
         self.container_name = container_name
         logger.debug(f"LocalConnection initialized with container {container_name}")
 
@@ -93,7 +95,8 @@ class SSHConnection(Connection):
         username: str = None,
         password: str = None,
         private_key: str = None,
-        sudo_password: str = None
+        sudo_password: str = None,
+        container_name: str = "amnezia-awg3"
     ):
         self.host = host
         self.port = port
@@ -101,6 +104,7 @@ class SSHConnection(Connection):
         self.password = password
         self.private_key = private_key
         self.sudo_password = sudo_password
+        self.container_name = container_name
         self._conn = None
         self._temp_key_path = None
         logger.debug(f"SSHConnection initialized for {username}@{host}:{port}")
@@ -143,7 +147,7 @@ class SSHConnection(Connection):
         await self._connect()
         if in_container:
             escaped = command.replace('"', '\\"')
-            cmd = f"docker exec amnezia-awg2 bash -c \"{escaped}\""
+            cmd = f"docker exec {self.container_name} bash -c \"{escaped}\""
         else:
             cmd = command
         if self.sudo_password:
@@ -168,7 +172,7 @@ class SSHConnection(Connection):
             await asyncssh.scp(local_path, (self._conn, remote_tmp))
 
             if in_container:
-                docker_cmd = f"docker cp {remote_tmp} amnezia-awg2:{path}"
+                docker_cmd = f"docker cp {remote_tmp} {self.container_name}:{path}"
                 if self.sudo_password:
                     docker_cmd = f"echo '{self.sudo_password}' | sudo -S {docker_cmd}"
                 result = await self._conn.run(docker_cmd)

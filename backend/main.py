@@ -1,4 +1,6 @@
-# main.py
+# Amnezia VPN Panel — main.py
+# Copyright (c) 2026 sameaslooks · https://lolz.team/threads/10302952/ · https://t.me/looksaboutthis
+# Licensed under GPL-3.0 · https://github.com/sameaslooks/amnezia-panel
 from fastapi import FastAPI, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -38,7 +40,7 @@ async def lifespan(app: FastAPI):
         if srv['is_active']:
             try:
                 conn = await _create_server_connection(srv)
-                server = AmneziaWGServer(conn, server_id=srv['id'])
+                server = AmneziaWGServer(conn, server_id=srv['id'], awg_version=srv.get('awg_version', 'awg3'))
                 await server.sync_routes_with_db()
                 await conn.close()
             except Exception as e:
@@ -149,7 +151,7 @@ async def get_server(server_id: int = 1, current_user: dict = Depends(get_curren
     conn = await _create_server_connection(server_data)
     if request:
         request.state.ssh_conn = conn
-    return AmneziaWGServer(conn, server_id=server_id)
+    return AmneziaWGServer(conn, server_id=server_id, awg_version=server_data.get('awg_version', 'awg3'))
 
 
 async def with_server(server_id: int, func, *args, **kwargs):
@@ -159,7 +161,7 @@ async def with_server(server_id: int, func, *args, **kwargs):
         raise HTTPException(status_code=404, detail=f"Server {server_id} not found")
     conn = await _create_server_connection(server_data)
     try:
-        server = AmneziaWGServer(conn, server_id=server_id)
+        server = AmneziaWGServer(conn, server_id=server_id, awg_version=server_data.get('awg_version', 'awg3'))
         return await func(server, *args, **kwargs)
     finally:
         await conn.close()
@@ -171,7 +173,7 @@ async def get_server_public(server_id: int = 1):
     if not server_data:
         raise HTTPException(status_code=404, detail="Server not found")
     conn = await _create_server_connection(server_data)
-    return AmneziaWGServer(conn, server_id=server_id)
+    return AmneziaWGServer(conn, server_id=server_id, awg_version=server_data.get('awg_version', 'awg3'))
 
 
 # ==================== AUTH ENDPOINTS ====================
@@ -677,7 +679,7 @@ async def test_server_connection(server_id: int, admin: dict = Depends(get_curre
                 password=server_data.get('password'),
                 private_key=server_data.get('private_key')
             )
-        awg = AmneziaWGServer(conn, server_id)
+        awg = AmneziaWGServer(conn, server_id, awg_version=server_data.get('awg_version', 'awg3'))
         await awg.conn.run_command("echo 'test'")
         await conn.close()
         return {"status": "ok", "message": "Connection successful"}
@@ -751,7 +753,7 @@ async def websocket_setup_server(websocket: WebSocket, server_id: int):
             private_key=server_data.get('private_key'),
             sudo_password=sudo_password
         )
-        server = AmneziaWGServer(conn, server_id=server_id)
+        server = AmneziaWGServer(conn, server_id=server_id, awg_version=server_data.get('awg_version', 'awg3'))
         async for update in server.setup_server_stream(sudo_password):
             await websocket.send_json(update)
     except WebSocketDisconnect:
